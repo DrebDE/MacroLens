@@ -86,7 +86,7 @@ The Gemini endpoint returns food names, visual confidence, and a rough portion s
 - Camera/gallery food scan, candidate correction, grams/ounces input, and meal category.
 - Local nutrient catalog with editable food/portion confirmation, manual add, and remove.
 - Profile-based calorie target using the Mifflin-St Jeor BMR formula and an activity factor.
-- Orange MacroLens sign-in and registration prototype with in-app Terms of Service and Privacy Policy drafts. Authentication is not connected; credentials are not verified, transmitted, or stored.
+- Green MacroLens sign-in and registration prototype with in-app Terms of Service and Privacy Policy drafts. Authentication is not connected; credentials are not verified, transmitted, or stored.
 - Data is in memory for this prototype; cloud persistence and a comprehensive nutrition database are not connected yet.
 
 Photo portion estimates are approximate. Always confirm the serving size and database match.

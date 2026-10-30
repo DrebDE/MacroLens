@@ -6,11 +6,11 @@ import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 
 void main() => runApp(const MacroTrackApp());
-const ink = Color(0xFF292522),
-    green = Color(0xFFF47721),
-    lime = Color(0xFFFFE7D3),
-    canvas = Color(0xFFFFF9F4),
-    muted = Color(0xFF897E75),
+const ink = Color(0xFF1F2B21),
+    green = Color(0xFF2E7D32),
+    lime = Color(0xFFE8F5E9),
+    canvas = Color(0xFFF7FAF6),
+    muted = Color(0xFF69766B),
     scanUrl = String.fromEnvironment('MACROS_API_URL',
         defaultValue: ''),
     scannerAccessCode = String.fromEnvironment('SCANNER_ACCESS_TOKEN',
@@ -142,13 +142,13 @@ class _MacroTrackAppState extends State<MacroTrackApp> {
               seedColor: green, primary: green, surface: canvas),
           inputDecorationTheme: InputDecorationTheme(
             filled: true,
-            fillColor: const Color(0xFFFFFCF9),
+            fillColor: Colors.white,
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Color(0xFFE9DED4))),
+                borderSide: const BorderSide(color: Color(0xFFDDE6DC))),
             enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Color(0xFFE9DED4))),
+                borderSide: const BorderSide(color: Color(0xFFDDE6DC))),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
                 borderSide: const BorderSide(color: green, width: 1.5)),
@@ -188,7 +188,7 @@ class _MacroTrackAppState extends State<MacroTrackApp> {
               bottomNavigationBar: NavigationBar(
                   selectedIndex: tab,
                   onDestinationSelected: (i) => setState(() => tab = i),
-                  backgroundColor: const Color(0xFFFFFCF9),
+                  backgroundColor: Colors.white,
                   indicatorColor: lime,
                   destinations: const [
                     NavigationDestination(
@@ -605,7 +605,7 @@ class Dashboard extends StatelessWidget {
               decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: const Color(0xFFF0E5DC))),
+                  border: Border.all(color: const Color(0xFFE1EADF))),
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -650,7 +650,7 @@ class Dashboard extends StatelessWidget {
                                 ? 0
                                 : (kcal / profile.calories).clamp(0.0, 1.0),
                             strokeWidth: 7,
-                            backgroundColor: const Color(0xFFFFE7D3),
+                            backgroundColor: const Color(0xFFE8F5E9),
                             color: green,
                             strokeCap: StrokeCap.round,
                           ),
@@ -666,11 +666,11 @@ class Dashboard extends StatelessWidget {
                     const SizedBox(height: 15),
                     Row(children: [
                       _Macro('Protein', protein, profile.proteinGoal, 'g',
-                          const Color(0xFFB95116)),
+                          const Color(0xFF1B5E20)),
                       _Macro('Carbs', carbs, profile.carbsGoal, 'g',
-                          const Color(0xFFF47721)),
+                          const Color(0xFF2E7D32)),
                       _Macro('Fat', fat, profile.fatGoal, 'g',
-                          const Color(0xFFC97743))
+                          const Color(0xFF00695C))
                     ])
                   ])),
           const SizedBox(height: 18),
@@ -726,7 +726,7 @@ class _Bar extends StatelessWidget {
       child: LinearProgressIndicator(
           value: goal == 0 ? 0 : (value / goal).clamp(0, 1),
           minHeight: 7,
-          backgroundColor: const Color(0xFFE9DED4),
+          backgroundColor: const Color(0xFFDDE6DC),
           color: color));
 }
 
@@ -853,7 +853,7 @@ class _WeekChart extends StatelessWidget {
                   width: 21,
                   height: height < 3 ? 3 : height,
                   decoration: BoxDecoration(
-                      color: i == 6 ? green : const Color(0xFFF8D8C2),
+                      color: i == 6 ? green : const Color(0xFFDCEBDD),
                       borderRadius: BorderRadius.circular(6))),
               const SizedBox(height: 5),
               Text(
@@ -1000,7 +1000,7 @@ class _ScannerPageState extends State<ScannerPage> {
             height: 245,
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
-                color: const Color(0xFFFFEBDD),
+                color: const Color(0xFFEEF5ED),
                 borderRadius: BorderRadius.circular(23)),
             child: photo == null
                 ? const Center(
