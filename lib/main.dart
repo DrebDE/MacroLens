@@ -48,6 +48,27 @@ Food? matchFood(String text) {
   return null;
 }
 
+Food? aiFoodFromResult(String name, Object? rawNutrition) {
+  if (rawNutrition is! Map) return null;
+  final calories = (rawNutrition['calories_kcal'] as num?)?.toDouble();
+  final protein = (rawNutrition['protein_g'] as num?)?.toDouble();
+  final carbs = (rawNutrition['carbs_g'] as num?)?.toDouble();
+  final fat = (rawNutrition['fat_g'] as num?)?.toDouble();
+  if (calories == null || protein == null || carbs == null || fat == null) {
+    return null;
+  }
+  final values = [calories, protein, carbs, fat];
+  if (values.any((value) => !value.isFinite || value < 0) ||
+      calories > 950 ||
+      protein > 100 ||
+      carbs > 100 ||
+      fat > 100 ||
+      protein + carbs + fat > 101) {
+    return null;
+  }
+  return Food(name, calories, protein, carbs, fat, [name], isAiEstimate: true);
+}
+
 String? imageMimeType(XFile file) {
   const supported = {
     'image/jpeg',
@@ -71,10 +92,12 @@ String? imageMimeType(XFile file) {
 
 class Food {
   const Food(this.name, this.kcal100, this.protein100, this.carbs100,
-      this.fat100, this.aliases);
+      this.fat100, this.aliases,
+      {this.isAiEstimate = false});
   final String name;
   final double kcal100, protein100, carbs100, fat100;
   final List<String> aliases;
+  final bool isAiEstimate;
 }
 
 class MealEntry {
@@ -573,7 +596,7 @@ const _privacySections = <(String, String)>[
   ),
   (
     'Food photos and AI scanning',
-    'When you tap Identify food with AI, the selected food photo is sent from your phone over HTTPS to the hosted MacroLens scanner. That service forwards the image and a food-identification prompt to Google Gemini API, then returns candidate food names. Do not scan people, documents, or sensitive images.'
+    'When you tap Identify food with AI, the selected food photo is sent from your phone over HTTPS to the hosted MacroLens scanner. That service forwards the image and a food-identification prompt to Google Gemini API, then returns candidate food names, portion suggestions, and approximate nutrition values per 100 grams. Do not scan people, documents, or sensitive images.'
   ),
   (
     'Google Gemini and free use',
@@ -581,7 +604,7 @@ const _privacySections = <(String, String)>[
   ),
   (
     'Nutrition calculations',
-    'The app calculates nutrition locally from its small sample catalog and the portion you confirm. It does not send meal logs to the Gemini model. Estimates are informational and can be inaccurate.'
+    'For catalog foods, the app calculates nutrition locally from catalog values. For unmatched foods, Gemini provides approximate generic values per 100 grams and the app scales them to your confirmed portion. Meal logs are not sent to the Gemini model. AI and catalog estimates are informational and can be inaccurate.'
   ),
   (
     'Retention and deletion',
@@ -952,7 +975,7 @@ class _ScannerPageState extends State<ScannerPage> {
   bool busy = false;
   String? error, detected;
   double confidence = 0;
-  Food? selectedFood;
+  Food? selectedFood, aiEstimate;
   String meal = 'Lunch', unit = 'g';
   @override
   void dispose() {
@@ -970,6 +993,7 @@ class _ScannerPageState extends State<ScannerPage> {
           error = null;
           detected = null;
           selectedFood = null;
+          aiEstimate = null;
         });
       }
     } catch (e) {
@@ -1021,10 +1045,19 @@ class _ScannerPageState extends State<ScannerPage> {
       final first = (body['items'] as List).first as Map<String, dynamic>;
       final label = first['food_name'] as String;
       final found = matchFood(label);
+      final estimate = aiFoodFromResult(label, first['nutrition_per_100g']);
+      final suggestedGrams = (first['portion_guess_g'] as num?)?.toDouble();
       setState(() {
         detected = label;
         confidence = ((first['confidence'] as num?)?.toDouble() ?? .65);
-        selectedFood = found;
+        aiEstimate = estimate;
+        selectedFood = found ?? estimate;
+        if (suggestedGrams != null &&
+            suggestedGrams.isFinite &&
+            suggestedGrams > 0 &&
+            suggestedGrams <= 5000) {
+          grams.text = suggestedGrams.round().toString();
+        }
       });
     } on TimeoutException {
       setState(() => error =
@@ -1042,7 +1075,7 @@ class _ScannerPageState extends State<ScannerPage> {
   void addFood() {
     final amount = double.tryParse(grams.text.trim().replaceAll(',', '.'));
     if (selectedFood == null) {
-      setState(() => error = 'Select the matching food from the database.');
+      setState(() => error = 'Choose a food or AI macro estimate.');
       return;
     }
     if (amount == null || amount <= 0 || amount > 5000) {
@@ -1132,26 +1165,32 @@ class _ScannerPageState extends State<ScannerPage> {
                             TextStyle(color: ink, fontWeight: FontWeight.w800)),
                     const SizedBox(height: 6),
                     Text(
-                        'AI match: $detected (${(confidence * 100).toStringAsFixed(0)}% confidence). Nutrition uses the selected database entry.',
+                        'AI match: $detected (${(confidence * 100).toStringAsFixed(0)}% confidence). Choose catalog values or use the approximate AI macro estimate.',
                         style: const TextStyle(color: muted, fontSize: 11)),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<Food>(
                         initialValue: selectedFood,
                         decoration: const InputDecoration(
-                            labelText: 'Food database match',
+                            labelText: 'Food and macro source',
                             border: OutlineInputBorder()),
-                        items: catalog
-                            .map((f) => DropdownMenuItem(
-                                value: f,
-                                child: Text(f.name,
-                                    overflow: TextOverflow.ellipsis)))
-                            .toList(),
+                        items: [
+                          ...catalog.map((f) => DropdownMenuItem(
+                              value: f,
+                              child: Text(f.name,
+                                  overflow: TextOverflow.ellipsis))),
+                          if (aiEstimate != null)
+                            DropdownMenuItem(
+                                value: aiEstimate,
+                                child: Text('${aiEstimate!.name} · AI estimate',
+                                    overflow: TextOverflow.ellipsis))
+                        ],
                         onChanged: (f) => setState(() => selectedFood = f)),
                     const SizedBox(height: 9),
                     Row(children: [
                       Expanded(
                         child: TextField(
                             controller: grams,
+                            onChanged: (_) => setState(() {}),
                             keyboardType: const TextInputType.numberWithOptions(
                                 decimal: true),
                             decoration: const InputDecoration(
@@ -1160,8 +1199,9 @@ class _ScannerPageState extends State<ScannerPage> {
                       ),
                       const SizedBox(width: 9),
                       SizedBox(
-                          width: 88,
+                          width: 120,
                           child: DropdownButtonFormField<String>(
+                              isExpanded: true,
                               initialValue: unit,
                               decoration: const InputDecoration(
                                   labelText: 'Unit',
@@ -1207,7 +1247,7 @@ class _ScannerPageState extends State<ScannerPage> {
         ],
         const SizedBox(height: 10),
         const Text(
-            'Image analysis is approximate. Confirm food and serving size; macro totals are calculated from the local food database.',
+            'Image analysis and AI macro values are approximate. Confirm the food and serving size before logging.',
             style: TextStyle(color: muted, fontSize: 10))
       ]);
 }
@@ -1218,14 +1258,24 @@ class _NutritionPreview extends StatelessWidget {
   final double grams;
   @override
   Widget build(BuildContext context) => Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
           color: lime.withValues(alpha: .55),
           borderRadius: BorderRadius.circular(12)),
-      child: Text(
-          '${(food.kcal100 * grams / 100).round()} kcal  ·  Protein ${(food.protein100 * grams / 100).toStringAsFixed(1)}g  ·  Carbs ${(food.carbs100 * grams / 100).toStringAsFixed(1)}g  ·  Fat ${(food.fat100 * grams / 100).toStringAsFixed(1)}g',
-          style: const TextStyle(
-              color: ink, fontSize: 11, fontWeight: FontWeight.w700)));
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+            food.isAiEstimate
+                ? 'AI macro estimate · approximate'
+                : 'Food catalog values',
+            style: const TextStyle(
+                color: muted, fontSize: 10, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 4),
+        Text(
+            'For ${grams.toStringAsFixed(0)} g: ${(food.kcal100 * grams / 100).round()} kcal  ·  Protein ${(food.protein100 * grams / 100).toStringAsFixed(1)} g  ·  Carbs ${(food.carbs100 * grams / 100).toStringAsFixed(1)} g  ·  Fat ${(food.fat100 * grams / 100).toStringAsFixed(1)} g',
+            style: const TextStyle(
+                color: ink, fontSize: 11, fontWeight: FontWeight.w700))
+      ]));
 }
 
 class FoodLogPage extends StatelessWidget {

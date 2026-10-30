@@ -1,6 +1,6 @@
 # MacroLens prototype
 
-A Flutter prototype for photo-assisted macronutrient tracking. The scanner uses a camera or gallery image, asks Gemini 3.5 Flash-Lite to identify visible food items, maps the selected result to the app's built-in food catalog, and calculates calories/protein/carbohydrates/fat from the confirmed portion weight. The model does not invent the displayed macro totals.
+A Flutter prototype for photo-assisted macronutrient tracking. The scanner uses a camera or gallery image and asks Gemini 3.5 Flash-Lite to identify visible food, suggest a serving size, and estimate typical macros per 100 g. Known foods can use the app's local catalog; unmatched foods use clearly labeled AI estimates. The app scales the selected per-100-g values to the serving size the user confirms.
 
 ## Run the Flutter app
 
@@ -83,7 +83,7 @@ The Gemini endpoint returns food names, visual confidence, and a rough portion s
 ## Prototype scope
 
 - Daily calories and macro dashboard, with a 7-day chart and date history.
-- Camera/gallery food scan, candidate correction, grams/ounces input, and meal category.
+- Camera/gallery food scan, candidate correction, AI macro estimates for unmatched foods, grams/ounces input, and meal category.
 - Local nutrient catalog with editable food/portion confirmation, manual add, and remove.
 - Profile-based calorie target using the Mifflin-St Jeor BMR formula and an activity factor.
 - Green MacroLens sign-in and registration prototype with in-app Terms of Service and Privacy Policy drafts. Authentication is not connected; email/password are not verified, transmitted, or stored. A device-only flag remembers the demo sign-in until the user signs out or removes the app.

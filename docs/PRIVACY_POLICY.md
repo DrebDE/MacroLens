@@ -10,13 +10,13 @@ The app has no authentication backend or cloud database. Login fields are used o
 
 ## Food photos and AI scanning
 
-When you tap **Identify food with AI**, the selected photo is sent over HTTPS to the hosted scanner service. The scanner forwards the image and a food-identification prompt to Google Gemini API and returns candidate food names. MacroLens does not ask the model to calculate nutrition values. Do not scan people, documents, or sensitive images.
+When you tap **Identify food with AI**, the selected photo is sent over HTTPS to the hosted scanner service. The scanner forwards the image and a food-identification prompt to Google Gemini API and returns candidate food names, portion suggestions, and approximate generic nutrition values per 100 grams. Do not scan people, documents, or sensitive images.
 
 The backend requests stateless Gemini interactions (`store=False`). Google’s handling of API prompts and images still depends on the API service tier and its terms. For unpaid Gemini API usage, Google may use submitted content to improve its products and services, and human reviewers may process inputs and outputs. Do not submit sensitive, confidential, or personal information to unpaid services. See the [Gemini API Additional Terms](https://ai.google.dev/gemini-api/terms) and [Google Privacy Policy](https://policies.google.com/privacy).
 
 ## Nutrition calculations
 
-The app calculates nutrition locally from its small sample catalog and the portion you confirm. It does not send meal logs to Gemini. Estimates are informational and can be inaccurate.
+For foods in the sample catalog, the app calculates nutrition locally from catalog values and the portion you confirm. For unlisted foods, Gemini supplies approximate generic values per 100 grams; the app scales those values to your confirmed portion. Meal logs are not sent to Gemini. AI and catalog estimates are informational and can be inaccurate.
 
 ## Retention and deletion
 
