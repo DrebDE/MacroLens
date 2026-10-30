@@ -1,6 +1,6 @@
 # MacroLens prototype
 
-A Flutter prototype for photo-assisted macronutrient tracking. The scanner uses a camera or gallery image and asks Gemini 3.5 Flash-Lite to identify visible food, suggest a serving size, and estimate typical macros per 100 g. Known foods can use the app's local catalog; unmatched foods use clearly labeled AI estimates. The app scales the selected per-100-g values to the serving size the user confirms.
+A Flutter prototype for photo-assisted macronutrient tracking. Its friendly scanner assistant is named Nouri. The scanner uses a camera or gallery image and asks Gemini 3.5 Flash-Lite to identify visible food, suggest a serving size, and estimate typical macros per 100 g. Known foods can use the app's local catalog; unmatched foods use clearly labeled AI estimates. The app scales the selected per-100-g values to the serving size the user confirms.
 
 ## Run the Flutter app
 

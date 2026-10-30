@@ -15,6 +15,7 @@ const ink = Color(0xFF1F2B21),
     scanUrl = String.fromEnvironment('MACROS_API_URL', defaultValue: ''),
     scannerAccessCode =
         String.fromEnvironment('SCANNER_ACCESS_TOKEN', defaultValue: '');
+const aiName = 'Nouri';
 const catalog = <Food>[
   Food('Cooked white rice', 130, 2.7, 28.2, .3,
       ['rice', 'white rice', 'steamed rice']),
@@ -1037,7 +1038,7 @@ class _ScannerPageState extends State<ScannerPage> {
         } catch (_) {}
         if (detail.contains('Gemini analysis failed: APITimeoutError')) {
           detail =
-              'Gemini took too long to analyze this photo. Please try again in a moment, or add the food manually.';
+              '$aiName took too long to analyze this photo. Please try again in a moment, or add the food manually.';
         }
         throw Exception(detail);
       }
@@ -1061,7 +1062,7 @@ class _ScannerPageState extends State<ScannerPage> {
       });
     } on TimeoutException {
       setState(() => error =
-          'Food analysis took too long. Please try again in a moment, or add the food manually.');
+          '$aiName took too long to analyze this photo. Please try again in a moment, or add the food manually.');
     } on http.ClientException {
       setState(() => error =
           'Cannot reach the scanner service. Check your internet connection and try again.');
@@ -1093,7 +1094,7 @@ class _ScannerPageState extends State<ScannerPage> {
             style: TextStyle(
                 color: ink, fontSize: 25, fontWeight: FontWeight.w800)),
         const SizedBox(height: 5),
-        const Text('Take a photo and let AI estimate your macros.',
+        const Text('Take a photo and let Nouri estimate your macros.',
             style: TextStyle(color: muted, fontSize: 12)),
         const SizedBox(height: 18),
         Container(
@@ -1144,7 +1145,7 @@ class _ScannerPageState extends State<ScannerPage> {
                         dimension: 20,
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white))
-                    : const Text('Identify food with AI',
+                    : const Text('Scan with Nouri',
                         style: TextStyle(fontWeight: FontWeight.w800)))),
         if (error != null)
           Padding(
@@ -1165,7 +1166,7 @@ class _ScannerPageState extends State<ScannerPage> {
                             TextStyle(color: ink, fontWeight: FontWeight.w800)),
                     const SizedBox(height: 6),
                     Text(
-                        'AI match: $detected (${(confidence * 100).toStringAsFixed(0)}% confidence). Choose catalog values or use the approximate AI macro estimate.',
+                        'Nouri identified $detected (${(confidence * 100).toStringAsFixed(0)}% confidence). Choose catalog values or use the approximate Nouri macro estimate.',
                         style: const TextStyle(color: muted, fontSize: 11)),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<Food>(
@@ -1186,35 +1187,51 @@ class _ScannerPageState extends State<ScannerPage> {
                         ],
                         onChanged: (f) => setState(() => selectedFood = f)),
                     const SizedBox(height: 9),
-                    Row(children: [
-                      Expanded(
-                        child: TextField(
-                            controller: grams,
-                            onChanged: (_) => setState(() {}),
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            decoration: const InputDecoration(
-                                labelText: 'Portion amount',
-                                border: OutlineInputBorder())),
-                      ),
-                      const SizedBox(width: 9),
-                      SizedBox(
-                          width: 120,
-                          child: DropdownButtonFormField<String>(
-                              isExpanded: true,
-                              initialValue: unit,
+                    LayoutBuilder(builder: (context, constraints) {
+                      final unitWidth =
+                          (constraints.maxWidth * .28).clamp(88.0, 112.0);
+                      return Row(children: [
+                        Expanded(
+                          child: TextField(
+                              controller: grams,
+                              onChanged: (_) => setState(() {}),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                      decimal: true),
                               decoration: const InputDecoration(
-                                  labelText: 'Unit',
-                                  border: OutlineInputBorder()),
-                              items: const [
-                                DropdownMenuItem(
-                                    value: 'g', child: Text('grams')),
-                                DropdownMenuItem(
-                                    value: 'oz', child: Text('ounces'))
-                              ],
-                              onChanged: (v) =>
-                                  setState(() => unit = v ?? 'g')))
-                    ]),
+                                  labelText: 'Portion amount',
+                                  border: OutlineInputBorder())),
+                        ),
+                        const SizedBox(width: 9),
+                        SizedBox(
+                            width: unitWidth,
+                            child: DropdownButtonFormField<String>(
+                                isExpanded: true,
+                                isDense: true,
+                                initialValue: unit,
+                                decoration: const InputDecoration(
+                                    labelText: 'Unit',
+                                    border: OutlineInputBorder(),
+                                    contentPadding: EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 16)),
+                                selectedItemBuilder: (_) => const [
+                                      Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: Text('g')),
+                                      Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: Text('oz')),
+                                    ],
+                                items: const [
+                                  DropdownMenuItem(
+                                      value: 'g', child: Text('grams')),
+                                  DropdownMenuItem(
+                                      value: 'oz', child: Text('ounces'))
+                                ],
+                                onChanged: (v) =>
+                                    setState(() => unit = v ?? 'g')))
+                      ]);
+                    }),
                     const SizedBox(height: 9),
                     DropdownButtonFormField<String>(
                         initialValue: meal,
@@ -1247,7 +1264,7 @@ class _ScannerPageState extends State<ScannerPage> {
         ],
         const SizedBox(height: 10),
         const Text(
-            'Image analysis and AI macro values are approximate. Confirm the food and serving size before logging.',
+            'Nouri’s image and macro estimates are approximate. Confirm the food and serving size before logging.',
             style: TextStyle(color: muted, fontSize: 10))
       ]);
 }
@@ -1266,7 +1283,7 @@ class _NutritionPreview extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(
             food.isAiEstimate
-                ? 'AI macro estimate · approximate'
+                ? 'Nouri estimate · approximate'
                 : 'Food catalog values',
             style: const TextStyle(
                 color: muted, fontSize: 10, fontWeight: FontWeight.w700)),
