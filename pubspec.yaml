@@ -1,0 +1,14 @@
+name: macro_scan
+description: Photo-based macronutrient tracker.
+publish_to: 'none'
+version: 1.0.0+1
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.6.0
+  http_parser: ^4.1.2
+  image_picker: ^1.2.4
+flutter:
+  uses-material-design: true
