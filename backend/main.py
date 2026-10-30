@@ -1,10 +1,11 @@
 import base64
 import asyncio
+import hmac
 import logging
 import os
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from google.genai import types
@@ -43,7 +44,16 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 @app.post("/api/analyze")
-async def analyze_food(image: UploadFile = File(...)) -> dict[str, Any]:
+async def analyze_food(
+    image: UploadFile = File(...),
+    x_scanner_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    scanner_token = os.getenv("SCANNER_ACCESS_TOKEN")
+    if scanner_token and not hmac.compare_digest(
+        (x_scanner_token or "").encode("utf-8"), scanner_token.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="Scanner access code is missing or incorrect.")
+
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="Set GEMINI_API_KEY in the backend environment.")

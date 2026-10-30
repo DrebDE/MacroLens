@@ -12,7 +12,7 @@ const ink = Color(0xFF292522),
     canvas = Color(0xFFFFF9F4),
     muted = Color(0xFF897E75),
     scanUrl = String.fromEnvironment('MACROS_API_URL',
-        defaultValue: 'http://192.168.1.20:8000/api/analyze');
+        defaultValue: '');
 const catalog = <Food>[
   Food('Cooked white rice', 130, 2.7, 28.2, .3,
       ['rice', 'white rice', 'steamed rice']),
@@ -884,6 +884,7 @@ class _ScannerPageState extends State<ScannerPage> {
   final picker = ImagePicker();
   final grams = TextEditingController(text: '150');
   final scannerEndpoint = TextEditingController(text: scanUrl);
+  final scannerToken = TextEditingController();
   XFile? photo;
   bool busy = false;
   String? error, detected;
@@ -894,6 +895,7 @@ class _ScannerPageState extends State<ScannerPage> {
   void dispose() {
     grams.dispose();
     scannerEndpoint.dispose();
+    scannerToken.dispose();
     super.dispose();
   }
 
@@ -931,6 +933,10 @@ class _ScannerPageState extends State<ScannerPage> {
             'This image format is not supported. Choose a JPEG, PNG, WebP, HEIC, or HEIF photo.');
       }
       final req = http.MultipartRequest('POST', endpoint);
+      final accessCode = scannerToken.text.trim();
+      if (accessCode.isNotEmpty) {
+        req.headers['x-scanner-token'] = accessCode;
+      }
       req.files.add(http.MultipartFile.fromBytes(
           'image', await photo!.readAsBytes(),
           filename: photo!.name, contentType: MediaType.parse(mime)));
@@ -957,10 +963,10 @@ class _ScannerPageState extends State<ScannerPage> {
       });
     } on TimeoutException {
       setState(() => error =
-          'Food analysis took too long. Check the backend terminal to see whether Gemini is still processing the photo, then try again.');
+          'Food analysis took too long. The hosted scanner may be waking up or Gemini may be slow. Wait a moment and try again.');
     } on http.ClientException {
       setState(() => error =
-          'Cannot reach the scanner at ${scannerEndpoint.text.trim()}. Check the laptop server, its Wi-Fi address, and that both devices are on the same network.');
+          'Cannot reach the scanner at ${scannerEndpoint.text.trim()}. Check the hosted URL and your phone’s internet connection.');
     } catch (e) {
       setState(() => error = e.toString().replaceFirst('Exception: ', ''));
     } finally {
@@ -1149,15 +1155,26 @@ class _ScannerPageState extends State<ScannerPage> {
                       color: ink, fontWeight: FontWeight.w800, fontSize: 13)),
               const SizedBox(height: 4),
               const Text(
-                  'Keep the backend running on your laptop. Phone and laptop must share Wi-Fi.',
+                  'Use the hosted scanner URL and access code. Your phone needs internet; it does not need your laptop.',
                   style: TextStyle(color: muted, fontSize: 11)),
               const SizedBox(height: 9),
               TextField(
                 controller: scannerEndpoint,
                 keyboardType: TextInputType.url,
                 decoration: const InputDecoration(
-                    labelText: 'Laptop scanner URL',
-                    hintText: 'http://192.168.1.20:8000/api/analyze',
+                    labelText: 'Hosted scanner URL',
+                    hintText: 'https://your-service.onrender.com/api/analyze',
+                    isDense: true),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: scannerToken,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: const InputDecoration(
+                    labelText: 'Scanner access code',
+                    helperText: 'This is separate from your Gemini API key.',
                     isDense: true),
               ),
             ],

@@ -9,7 +9,7 @@ flutter pub get
 flutter run -d chrome --dart-define=MACROS_API_URL=http://localhost:8000/api/analyze
 ```
 
-For an Android emulator, set the endpoint to `http://10.0.2.2:8000/api/analyze`. For a physical phone, use the laptop's current Wi-Fi address. The scanner screen lets you edit this address; the phone and laptop must be on the same Wi-Fi network.
+For online scanning, deploy the scanner service described below and enter its HTTPS endpoint and scanner access code in the Scanner tab. The phone needs internet access, but it does not need to share Wi-Fi with or connect to your laptop.
 
 ## Open and run on an Android phone in VS Code (Windows)
 
@@ -34,13 +34,29 @@ To build an APK for manual installation instead, run `flutter build apk --debug`
 adb install -r 'build\app\outputs\flutter-apk\app-debug.apk'
 ```
 
-For live Gemini scanning on a physical phone, start the backend below. The phone and PC need to be on the same Wi-Fi network. Use the laptop's LAN IP in the Scanner connection field, for example:
+## Deploy the scanner online for phone testing
 
-```powershell
-flutter run --dart-define=MACROS_API_URL=http://192.168.1.20:8000/api/analyze
-```
+This repository includes a Render Blueprint for the FastAPI scanner. It creates a free Python web service from `backend/`, exposes `/health`, and asks you to enter secrets in Render rather than committing them to GitHub.
 
-Replace `192.168.1.20` with the PC's current LAN IP. The backend requires `GEMINI_API_KEY`; the phone app does not contain the key. The scanner cannot identify food until that service is running and configured.
+1. Create a Render account, choose **New → Blueprint**, and connect the `DrebDE/MacroLens` GitHub repository on the `main` branch.
+2. When Render prompts for `GEMINI_API_KEY`, enter your Gemini API key in the dashboard. Do not put it in this repository or the phone app.
+3. Generate a separate scanner access code in PowerShell and copy it to the Render prompt for `SCANNER_ACCESS_TOKEN`:
+
+   ```powershell
+   $bytes = New-Object byte[] 32
+   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+   $rng.GetBytes($bytes)
+   $scannerCode = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+   $rng.Dispose()
+   $scannerCode
+   ```
+
+4. Choose the **Free** plan and create the Blueprint. After deployment, open `https://YOUR-SERVICE.onrender.com/health`; it should return `{"status":"ok"}`.
+5. Install the updated app on your phone once using USB and VS Code. Then enter `https://YOUR-SERVICE.onrender.com/api/analyze` as the Hosted scanner URL and enter the same scanner access code in the Scanner tab. Never enter your Gemini API key in the app. After this setup, the phone can scan without USB or the laptop; it only needs internet access.
+
+Render's free web services spin down after 15 minutes without traffic and can take about a minute to wake on the next request. This is suitable for testing, though the first scan after idle may take longer. See [Render's free service limits](https://render.com/docs/free).
+
+The current app does not retain the scanner URL or access code after it is closed. Re-enter them after restarting MacroLens. Keep the scanner access code private. For local backend development instead, follow the steps below; local mode can omit `SCANNER_ACCESS_TOKEN`.
 
 ## Start the scanner service
 
