@@ -885,7 +885,6 @@ class ScannerPage extends StatefulWidget {
 class _ScannerPageState extends State<ScannerPage> {
   final picker = ImagePicker();
   final grams = TextEditingController(text: '150');
-  final scannerEndpoint = TextEditingController(text: scanUrl);
   XFile? photo;
   bool busy = false;
   String? error, detected;
@@ -895,7 +894,6 @@ class _ScannerPageState extends State<ScannerPage> {
   @override
   void dispose() {
     grams.dispose();
-    scannerEndpoint.dispose();
     super.dispose();
   }
 
@@ -923,7 +921,7 @@ class _ScannerPageState extends State<ScannerPage> {
       error = null;
     });
     try {
-      final endpoint = Uri.tryParse(scannerEndpoint.text.trim());
+      final endpoint = Uri.tryParse(scanUrl.trim());
       if (endpoint == null || !endpoint.hasScheme || endpoint.host.isEmpty) {
         throw const FormatException('Enter a valid scanner service URL.');
       }
@@ -966,7 +964,7 @@ class _ScannerPageState extends State<ScannerPage> {
           'Food analysis took too long. The hosted scanner may be waking up or Gemini may be slow. Wait a moment and try again.');
     } on http.ClientException {
       setState(() => error =
-          'Cannot reach the scanner at ${scannerEndpoint.text.trim()}. Check the hosted URL and your phone’s internet connection.');
+          'Cannot reach the scanner service. Check your internet connection and try again.');
     } catch (e) {
       setState(() => error = e.toString().replaceFirst('Exception: ', ''));
     } finally {
@@ -1140,35 +1138,6 @@ class _ScannerPageState extends State<ScannerPage> {
                                 style: TextStyle(fontWeight: FontWeight.w800))))
                   ]))
         ],
-        const SizedBox(height: 10),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFF0E5DC))),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Scanner connection',
-                  style: TextStyle(
-                      color: ink, fontWeight: FontWeight.w800, fontSize: 13)),
-              const SizedBox(height: 4),
-              const Text(
-                  'Food scanning uses the online service. Your phone needs internet; it does not need your laptop.',
-                  style: TextStyle(color: muted, fontSize: 11)),
-              const SizedBox(height: 9),
-              TextField(
-                controller: scannerEndpoint,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                    labelText: 'Hosted scanner URL',
-                    hintText: 'https://your-service.onrender.com/api/analyze',
-                    isDense: true),
-              ),
-            ],
-          ),
-        ),
         const SizedBox(height: 10),
         const Text(
             'Image analysis is approximate. Confirm food and serving size; macro totals are calculated from the local food database.',
