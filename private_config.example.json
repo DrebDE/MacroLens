@@ -1,0 +1,4 @@
+{
+  "MACROS_API_URL": "https://your-service.onrender.com/api/analyze",
+  "SCANNER_ACCESS_TOKEN": "replace-with-your-private-scanner-access-code"
+}

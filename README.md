@@ -9,7 +9,7 @@ flutter pub get
 flutter run -d chrome --dart-define=MACROS_API_URL=http://localhost:8000/api/analyze
 ```
 
-For online scanning, deploy the scanner service described below and enter its HTTPS endpoint and scanner access code in the Scanner tab. The phone needs internet access, but it does not need to share Wi-Fi with or connect to your laptop.
+For online scanning, deploy the scanner service described below and build the app with a private config file. The phone needs internet access, but it does not need to share Wi-Fi with or connect to your laptop. The scanner access code is not shown in the app.
 
 ## Open and run on an Android phone in VS Code (Windows)
 
@@ -52,11 +52,19 @@ This repository includes a Render Blueprint for the FastAPI scanner. It creates 
    ```
 
 4. Choose the **Free** plan and create the Blueprint. After deployment, open `https://YOUR-SERVICE.onrender.com/health`; it should return `{"status":"ok"}`.
-5. Install the updated app on your phone once using USB and VS Code. Then enter `https://YOUR-SERVICE.onrender.com/api/analyze` as the Hosted scanner URL and enter the same scanner access code in the Scanner tab. Never enter your Gemini API key in the app. After this setup, the phone can scan without USB or the laptop; it only needs internet access.
+5. Copy `private_config.example.json` to `private_config.json`. Replace the URL with your Render service URL plus `/api/analyze`, and replace the placeholder access code with the same `SCANNER_ACCESS_TOKEN` value you set in Render. Keep `private_config.json` private; it is ignored by Git.
+
+6. Connect the phone by USB once, then install the app using:
+
+   ```powershell
+   flutter run --dart-define-from-file=private_config.json
+   ```
+
+   The scanner access code is compiled into this private demo build, so it is not displayed during the presentation. Do not share the APK publicly; rotate the scanner access code after the demo if you distribute the app. Never put your Gemini API key in the phone app. After installation, the phone can scan without USB or the laptop; it only needs internet access.
 
 Render's free web services spin down after 15 minutes without traffic and can take about a minute to wake on the next request. This is suitable for testing, though the first scan after idle may take longer. See [Render's free service limits](https://render.com/docs/free).
 
-The current app does not retain the scanner URL or access code after it is closed. Re-enter them after restarting MacroLens. Keep the scanner access code private. For local backend development instead, follow the steps below; local mode can omit `SCANNER_ACCESS_TOKEN`.
+For local backend development instead, follow the steps below; local mode can omit `SCANNER_ACCESS_TOKEN`.
 
 ## Start the scanner service
 

@@ -12,6 +12,8 @@ const ink = Color(0xFF292522),
     canvas = Color(0xFFFFF9F4),
     muted = Color(0xFF897E75),
     scanUrl = String.fromEnvironment('MACROS_API_URL',
+        defaultValue: ''),
+    scannerAccessCode = String.fromEnvironment('SCANNER_ACCESS_TOKEN',
         defaultValue: '');
 const catalog = <Food>[
   Food('Cooked white rice', 130, 2.7, 28.2, .3,
@@ -884,7 +886,6 @@ class _ScannerPageState extends State<ScannerPage> {
   final picker = ImagePicker();
   final grams = TextEditingController(text: '150');
   final scannerEndpoint = TextEditingController(text: scanUrl);
-  final scannerToken = TextEditingController();
   XFile? photo;
   bool busy = false;
   String? error, detected;
@@ -895,7 +896,6 @@ class _ScannerPageState extends State<ScannerPage> {
   void dispose() {
     grams.dispose();
     scannerEndpoint.dispose();
-    scannerToken.dispose();
     super.dispose();
   }
 
@@ -933,7 +933,7 @@ class _ScannerPageState extends State<ScannerPage> {
             'This image format is not supported. Choose a JPEG, PNG, WebP, HEIC, or HEIF photo.');
       }
       final req = http.MultipartRequest('POST', endpoint);
-      final accessCode = scannerToken.text.trim();
+      final accessCode = scannerAccessCode.trim();
       if (accessCode.isNotEmpty) {
         req.headers['x-scanner-token'] = accessCode;
       }
@@ -1155,7 +1155,7 @@ class _ScannerPageState extends State<ScannerPage> {
                       color: ink, fontWeight: FontWeight.w800, fontSize: 13)),
               const SizedBox(height: 4),
               const Text(
-                  'Use the hosted scanner URL and access code. Your phone needs internet; it does not need your laptop.',
+                  'Food scanning uses the online service. Your phone needs internet; it does not need your laptop.',
                   style: TextStyle(color: muted, fontSize: 11)),
               const SizedBox(height: 9),
               TextField(
@@ -1164,17 +1164,6 @@ class _ScannerPageState extends State<ScannerPage> {
                 decoration: const InputDecoration(
                     labelText: 'Hosted scanner URL',
                     hintText: 'https://your-service.onrender.com/api/analyze',
-                    isDense: true),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: scannerToken,
-                obscureText: true,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: const InputDecoration(
-                    labelText: 'Scanner access code',
-                    helperText: 'This is separate from your Gemini API key.',
                     isDense: true),
               ),
             ],

@@ -83,6 +83,7 @@ async def analyze_food(
                     "mime_type": mime_type,
                 },
             ],
+            generation_config={"thinking_level": "low"},
             response_format={
                 "type": "text",
                 "mime_type": "application/json",

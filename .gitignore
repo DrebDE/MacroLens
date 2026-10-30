@@ -64,3 +64,4 @@ app.*.map.json
 
 **/build/
 .vscode/settings.json
+private_config.json
