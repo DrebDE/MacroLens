@@ -73,7 +73,7 @@ async def analyze_food(
         )
         result = await asyncio.to_thread(
             client.interactions.create,
-            model="gemini-3.8-flash",
+            model="gemini-3.5-flash-lite",
             store=False,
             input=[
                 {"type": "text", "text": prompt},
@@ -83,7 +83,7 @@ async def analyze_food(
                     "mime_type": mime_type,
                 },
             ],
-            generation_config={"thinking_level": "low"},
+            generation_config={"thinking_level": "minimal"},
             response_format={
                 "type": "text",
                 "mime_type": "application/json",

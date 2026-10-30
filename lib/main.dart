@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const MacroTrackApp());
 const ink = Color(0xFF1F2B21),
@@ -11,10 +12,9 @@ const ink = Color(0xFF1F2B21),
     lime = Color(0xFFE8F5E9),
     canvas = Color(0xFFF7FAF6),
     muted = Color(0xFF69766B),
-    scanUrl = String.fromEnvironment('MACROS_API_URL',
-        defaultValue: ''),
-    scannerAccessCode = String.fromEnvironment('SCANNER_ACCESS_TOKEN',
-        defaultValue: '');
+    scanUrl = String.fromEnvironment('MACROS_API_URL', defaultValue: ''),
+    scannerAccessCode =
+        String.fromEnvironment('SCANNER_ACCESS_TOKEN', defaultValue: '');
 const catalog = <Food>[
   Food('Cooked white rice', 130, 2.7, 28.2, .3,
       ['rice', 'white rice', 'steamed rice']),
@@ -114,10 +114,51 @@ class MacroTrackApp extends StatefulWidget {
 
 class _MacroTrackAppState extends State<MacroTrackApp> {
   bool signedIn = false;
+  bool sessionLoaded = false;
   int tab = 0;
+  static const _demoSessionKey = 'macrolens.demo.signed_in';
   final profile = HealthProfile();
   final entries = <MealEntry>[];
   DateTime selectedDay = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDemoSession();
+  }
+
+  Future<void> _loadDemoSession() async {
+    var restoredSession = false;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      restoredSession = preferences.getBool(_demoSessionKey) ?? false;
+    } catch (_) {
+      // If local storage is unavailable, fall back to the sign-in screen.
+    }
+    if (!mounted) return;
+    setState(() {
+      signedIn = restoredSession;
+      sessionLoaded = true;
+    });
+  }
+
+  Future<void> _continueDemo() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_demoSessionKey, true);
+    if (!mounted) return;
+    setState(() => signedIn = true);
+  }
+
+  Future<void> _signOut() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_demoSessionKey);
+    if (!mounted) return;
+    setState(() {
+      signedIn = false;
+      tab = 0;
+    });
+  }
+
   List<MealEntry> get todays => entries
       .where((e) =>
           e.date.year == selectedDay.year &&
@@ -154,66 +195,72 @@ class _MacroTrackAppState extends State<MacroTrackApp> {
                 borderSide: const BorderSide(color: green, width: 1.5)),
           ),
           fontFamily: 'Roboto'),
-      home: signedIn
-          ? Scaffold(
-              body: SafeArea(
-                  child: IndexedStack(index: tab, children: [
-                Dashboard(
-                    day: selectedDay,
-                    entries: todays,
-                    allEntries: entries,
-                    kcal: kcal,
-                    protein: protein,
-                    carbs: carbs,
-                    fat: fat,
-                    profile: profile,
-                    onScan: () => setState(() => tab = 1),
-                    onDate: changeDay,
-                    onAdd: add,
-                    onRemove: remove,
-                    onShowLog: () => setState(() => tab = 2)),
-                ScannerPage(onAdd: (e) {
-                  add(e);
-                  changeDay(e.date);
-                  setState(() => tab = 0);
-                }),
-                FoodLogPage(
-                    day: selectedDay,
-                    entries: todays,
-                    onDate: changeDay,
-                    onAdd: add,
-                    onRemove: remove),
-                ProfilePage(profile: profile, onSaved: () => setState(() {}))
-              ])),
-              bottomNavigationBar: NavigationBar(
-                  selectedIndex: tab,
-                  onDestinationSelected: (i) => setState(() => tab = i),
-                  backgroundColor: Colors.white,
-                  indicatorColor: lime,
-                  destinations: const [
-                    NavigationDestination(
-                        icon: Icon(Icons.home_outlined),
-                        selectedIcon: Icon(Icons.home_rounded),
-                        label: 'Today'),
-                    NavigationDestination(
-                        icon: Icon(Icons.document_scanner_outlined),
-                        selectedIcon: Icon(Icons.document_scanner_rounded),
-                        label: 'Scanner'),
-                    NavigationDestination(
-                        icon: Icon(Icons.restaurant_menu_outlined),
-                        selectedIcon: Icon(Icons.restaurant_menu),
-                        label: 'Food log'),
-                    NavigationDestination(
-                        icon: Icon(Icons.person_outline_rounded),
-                        selectedIcon: Icon(Icons.person_rounded),
-                        label: 'Profile')
-                  ]))
-          : LoginPage(onContinue: () => setState(() => signedIn = true)));
+      home: !sessionLoaded
+          ? const Scaffold(
+              body: Center(child: CircularProgressIndicator(color: green)))
+          : signedIn
+              ? Scaffold(
+                  body: SafeArea(
+                      child: IndexedStack(index: tab, children: [
+                    Dashboard(
+                        day: selectedDay,
+                        entries: todays,
+                        allEntries: entries,
+                        kcal: kcal,
+                        protein: protein,
+                        carbs: carbs,
+                        fat: fat,
+                        profile: profile,
+                        onScan: () => setState(() => tab = 1),
+                        onDate: changeDay,
+                        onAdd: add,
+                        onRemove: remove,
+                        onShowLog: () => setState(() => tab = 2)),
+                    ScannerPage(onAdd: (e) {
+                      add(e);
+                      changeDay(e.date);
+                      setState(() => tab = 0);
+                    }),
+                    FoodLogPage(
+                        day: selectedDay,
+                        entries: todays,
+                        onDate: changeDay,
+                        onAdd: add,
+                        onRemove: remove),
+                    ProfilePage(
+                        profile: profile,
+                        onSaved: () => setState(() {}),
+                        onSignOut: _signOut)
+                  ])),
+                  bottomNavigationBar: NavigationBar(
+                      selectedIndex: tab,
+                      onDestinationSelected: (i) => setState(() => tab = i),
+                      backgroundColor: Colors.white,
+                      indicatorColor: lime,
+                      destinations: const [
+                        NavigationDestination(
+                            icon: Icon(Icons.home_outlined),
+                            selectedIcon: Icon(Icons.home_rounded),
+                            label: 'Today'),
+                        NavigationDestination(
+                            icon: Icon(Icons.document_scanner_outlined),
+                            selectedIcon: Icon(Icons.document_scanner_rounded),
+                            label: 'Scanner'),
+                        NavigationDestination(
+                            icon: Icon(Icons.restaurant_menu_outlined),
+                            selectedIcon: Icon(Icons.restaurant_menu),
+                            label: 'Food log'),
+                        NavigationDestination(
+                            icon: Icon(Icons.person_outline_rounded),
+                            selectedIcon: Icon(Icons.person_rounded),
+                            label: 'Profile')
+                      ]))
+              : LoginPage(onContinue: _continueDemo));
 }
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key, required this.onContinue});
-  final VoidCallback onContinue;
+  final Future<void> Function() onContinue;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -226,6 +273,7 @@ class _LoginPageState extends State<LoginPage> {
   bool accepted = false;
   bool register = false;
   bool showPassword = false;
+  bool submitting = false;
 
   @override
   void dispose() {
@@ -234,10 +282,19 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  void enterDemo() {
+  Future<void> enterDemo() async {
     if (!accepted || !(formKey.currentState?.validate() ?? false)) return;
     password.clear();
-    widget.onContinue();
+    setState(() => submitting = true);
+    try {
+      await widget.onContinue();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not save this device’s sign-in. Try again.')));
+        setState(() => submitting = false);
+      }
+    }
   }
 
   @override
@@ -356,14 +413,20 @@ class _LoginPageState extends State<LoginPage> {
                       SizedBox(
                         height: 52,
                         child: FilledButton(
-                          onPressed: accepted ? enterDemo : null,
+                          onPressed: accepted && !submitting ? enterDemo : null,
                           style: FilledButton.styleFrom(
                               backgroundColor: green,
                               foregroundColor: Colors.white),
-                          child: Text(
-                              register ? 'Create demo account' : 'Sign in',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w800, fontSize: 15)),
+                          child: submitting
+                              ? const SizedBox.square(
+                                  dimension: 22,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white))
+                              : Text(
+                                  register ? 'Create demo account' : 'Sign in',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 15)),
                         ),
                       ),
                       const SizedBox(height: 13),
@@ -380,7 +443,7 @@ class _LoginPageState extends State<LoginPage> {
                             color: lime.withValues(alpha: .6),
                             borderRadius: BorderRadius.circular(14)),
                         child: const Text(
-                          'Prototype sign-in: authentication is not connected. Your email and password are not sent or saved; continue enters the local demo only.',
+                          'Prototype sign-in: your email and password are not sent or saved. This device remembers that you entered the demo.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: muted, fontSize: 11),
                         ),
@@ -506,11 +569,11 @@ const _termsSections = <(String, String)>[
 const _privacySections = <(String, String)>[
   (
     'Prototype and account data',
-    'The current app has no authentication backend or cloud database. Login and registration fields are used only for local form validation; the entered email and password are not sent or saved. Meal entries and profile settings exist in app memory during the session and may be lost when the app closes.'
+    'The app has no authentication backend or cloud database. Login fields are used only for local form validation; the entered email and password are not sent or saved. A simple sign-in flag is stored on this device so the demo stays signed in. Meal entries and profile settings exist in app memory and may be lost when the app closes.'
   ),
   (
     'Food photos and AI scanning',
-    'When you tap Identify food with AI, the selected food photo is sent from your phone over your local Wi-Fi to the scanner service running on your laptop. That service forwards the image and a food-identification prompt to Google Gemini API, then returns candidate food names. Do not scan people, documents, or sensitive images.'
+    'When you tap Identify food with AI, the selected food photo is sent from your phone over HTTPS to the hosted MacroLens scanner. That service forwards the image and a food-identification prompt to Google Gemini API, then returns candidate food names. Do not scan people, documents, or sensitive images.'
   ),
   (
     'Google Gemini and free use',
@@ -522,11 +585,11 @@ const _privacySections = <(String, String)>[
   ),
   (
     'Retention and deletion',
-    'The prototype does not intentionally store scanner photos or meal logs on a server, but Google’s handling of a submitted image depends on the Gemini service tier and its terms. Closing or reinstalling the app can clear in-memory entries. No account deletion feature exists because accounts are not connected.'
+    'The prototype does not intentionally store scanner photos or meal logs on a server, but Google’s handling of a submitted image depends on the Gemini service tier and its terms. Closing or reinstalling the app can clear in-memory entries. Uninstalling the app also removes the locally stored demo sign-in flag. No account deletion feature exists because accounts are not connected.'
   ),
   (
     'Network and security',
-    'Phone-to-laptop scanner traffic in this prototype uses a local HTTP address on your Wi-Fi. Do not expose the development server to the public internet. A production release needs encrypted transport, access controls, a security review, and a defined deletion process.'
+    'Online scanner traffic uses HTTPS and a separate scanner access code. The Gemini API key stays on the scanner service and must not be placed in the phone app. This prototype is not a production authentication system and has not had a security review.'
   ),
   (
     'Contact and changes',
@@ -948,6 +1011,10 @@ class _ScannerPageState extends State<ScannerPage> {
           final errorBody = jsonDecode(response.body) as Map<String, dynamic>;
           detail = (errorBody['detail'] as String?) ?? detail;
         } catch (_) {}
+        if (detail.contains('Gemini analysis failed: APITimeoutError')) {
+          detail =
+              'Gemini took too long to analyze this photo. Please try again in a moment, or add the food manually.';
+        }
         throw Exception(detail);
       }
       final body = jsonDecode(response.body) as Map<String, dynamic>;
@@ -961,7 +1028,7 @@ class _ScannerPageState extends State<ScannerPage> {
       });
     } on TimeoutException {
       setState(() => error =
-          'Food analysis took too long. The hosted scanner may be waking up or Gemini may be slow. Wait a moment and try again.');
+          'Food analysis took too long. Please try again in a moment, or add the food manually.');
     } on http.ClientException {
       setState(() => error =
           'Cannot reach the scanner service. Check your internet connection and try again.');
@@ -1204,9 +1271,14 @@ class FoodLogPage extends StatelessWidget {
 }
 
 class ProfilePage extends StatelessWidget {
-  const ProfilePage({super.key, required this.profile, required this.onSaved});
+  const ProfilePage(
+      {super.key,
+      required this.profile,
+      required this.onSaved,
+      required this.onSignOut});
   final HealthProfile profile;
   final VoidCallback onSaved;
+  final VoidCallback onSignOut;
   @override
   Widget build(BuildContext context) =>
       ListView(padding: const EdgeInsets.all(20), children: [
@@ -1271,6 +1343,11 @@ class ProfilePage extends StatelessWidget {
             ),
           ]),
         ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+            onPressed: onSignOut,
+            icon: const Icon(Icons.logout_rounded),
+            label: const Text('Sign out of this device')),
         const SizedBox(height: 12),
         const Text(
             'Targets are estimates for general tracking, not medical advice.',

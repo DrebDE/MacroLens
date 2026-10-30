@@ -1,6 +1,6 @@
 # MacroLens prototype
 
-A Flutter prototype for photo-assisted macronutrient tracking. The scanner uses a camera or gallery image, asks Gemini 3.8 Flash to identify visible food items, maps the selected result to the app's built-in food catalog, and calculates calories/protein/carbohydrates/fat from the confirmed portion weight. The model does not invent the displayed macro totals.
+A Flutter prototype for photo-assisted macronutrient tracking. The scanner uses a camera or gallery image, asks Gemini 3.5 Flash-Lite to identify visible food items, maps the selected result to the app's built-in food catalog, and calculates calories/protein/carbohydrates/fat from the confirmed portion weight. The model does not invent the displayed macro totals.
 
 ## Run the Flutter app
 
@@ -21,7 +21,7 @@ For online scanning, deploy the scanner service described below and build the ap
 ```powershell
 flutter pub get
 flutter devices
-flutter run
+flutter run --dart-define-from-file=private_config.json
 ```
 
 Choose the phone when Flutter asks for a device. `flutter run` builds, installs, and launches the app; keep the terminal open for hot reload. The same steps work with an Android emulator.
@@ -86,7 +86,7 @@ The Gemini endpoint returns food names, visual confidence, and a rough portion s
 - Camera/gallery food scan, candidate correction, grams/ounces input, and meal category.
 - Local nutrient catalog with editable food/portion confirmation, manual add, and remove.
 - Profile-based calorie target using the Mifflin-St Jeor BMR formula and an activity factor.
-- Green MacroLens sign-in and registration prototype with in-app Terms of Service and Privacy Policy drafts. Authentication is not connected; credentials are not verified, transmitted, or stored.
+- Green MacroLens sign-in and registration prototype with in-app Terms of Service and Privacy Policy drafts. Authentication is not connected; email/password are not verified, transmitted, or stored. A device-only flag remembers the demo sign-in until the user signs out or removes the app.
 - Data is in memory for this prototype; cloud persistence and a comprehensive nutrition database are not connected yet.
 
 Photo portion estimates are approximate. Always confirm the serving size and database match.
