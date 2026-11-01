@@ -162,6 +162,18 @@ NUTRITION:
         confidence = float(item["confidence"])
         if not (1 <= low <= guess <= high <= 5000 and 0 <= confidence <= 1):
             raise HTTPException(status_code=502, detail="Nouri returned an invalid estimate. Try another food photo.")
+        # A photo is never a scale reading. Expand overly narrow model bounds to
+        # at least a 20% visual margin on each side where the app's limits allow.
+        guess = round(guess)
+        low = min(low, max(1, guess * 0.8))
+        high = max(high, min(5000, guess * 1.2))
+        item["portion_guess_g"] = guess
+        item["portion_low_g"] = max(1, math.floor(low))
+        item["portion_high_g"] = min(5000, math.ceil(high))
+        if item["portion_low_g"] >= guess:
+            item["portion_low_g"] = max(1, guess - 1)
+        if item["portion_high_g"] <= guess:
+            item["portion_high_g"] = min(5000, guess + 1)
         item["confidence"] = min(confidence, 0.95)
 
         nutrition = item.get("nutrition_per_100g")
