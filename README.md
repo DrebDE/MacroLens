@@ -87,7 +87,8 @@ The interaction is configured with `store=False`; unpaid Gemini API usage may st
 - Daily calories and macro dashboard, with a 7-day chart and date history.
 - Camera/gallery food scan, candidate correction, AI macro estimates for unmatched foods, grams/ounces input, and meal category.
 - Local nutrient catalog with editable food/portion confirmation, manual add, and remove.
-- Profile-based calorie target using the Mifflin-St Jeor BMR formula and an activity factor.
+- First-sign-in profile setup for name, age, height, current and optional goal weight, weight goal, activity, and calorie-formula setting. Profile details are stored only on the device.
+- Estimated adult calorie target based on Mifflin-St Jeor, activity, and a modest prototype goal adjustment. Macro targets use a visible 30/40/30 split; these are general estimates, not medical advice.
 - Green MacroLens sign-in and registration prototype with in-app Terms of Service and Privacy Policy drafts. Authentication is not connected; email/password are not verified, transmitted, or stored. A device-only flag remembers the demo sign-in until the user signs out or removes the app.
 - Data is in memory for this prototype; cloud persistence and a comprehensive nutrition database are not connected yet.
 

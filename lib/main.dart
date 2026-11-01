@@ -119,15 +119,85 @@ class MealEntry {
 }
 
 class HealthProfile {
-  String sex = 'Female';
-  int age = 24;
-  double height = 165, weight = 60, activity = 1.375;
+  String name = '';
+  String formulaSetting = 'Average';
+  String goal = 'Maintain weight';
+  int age = 0;
+  double height = 0, weight = 0, activity = 1.2;
+  double? goalWeight;
+
+  bool get isComplete =>
+      name.trim().isNotEmpty &&
+      age >= 13 &&
+      age <= 110 &&
+      height >= 100 &&
+      height <= 250 &&
+      weight >= 30 &&
+      weight <= 350 &&
+      const ['Lose weight', 'Maintain weight', 'Gain weight'].contains(goal) &&
+      const ['Female', 'Male', 'Average'].contains(formulaSetting) &&
+      const [1.2, 1.375, 1.55, 1.725].contains(activity);
+  bool get canEstimateCalories => isComplete && age >= 18;
+  double get maintenanceCalories => bmr * activity;
   double get bmr =>
-      10 * weight + 6.25 * height - 5 * age + (sex == 'Male' ? 5 : -161);
-  double get calories => (bmr * activity).roundToDouble();
+      10 * weight +
+      6.25 * height -
+      5 * age +
+      switch (formulaSetting) {
+        'Female' => -161,
+        'Male' => 5,
+        _ => -78,
+      };
+  double get goalAdjustment => switch (goal) {
+        'Lose weight' => -250,
+        'Gain weight' => 200,
+        _ => 0,
+      };
+  double get calories => canEstimateCalories
+      ? (maintenanceCalories + goalAdjustment).clamp(0, 10000).roundToDouble()
+      : 0;
   double get proteinGoal => calories * .30 / 4;
   double get carbsGoal => calories * .40 / 4;
   double get fatGoal => calories * .30 / 9;
+
+  String get activityLabel => switch (activity) {
+        1.2 => 'Mostly sitting',
+        1.375 => 'Light activity',
+        1.55 => 'Moderate activity',
+        _ => 'Very active',
+      };
+
+  Map<String, Object?> toJson() => {
+        'name': name.trim(),
+        'age': age,
+        'height': height,
+        'weight': weight,
+        'formulaSetting': formulaSetting,
+        'activity': activity,
+        'goal': goal,
+        'goalWeight': goalWeight,
+      };
+
+  void restore(Map<String, dynamic> data) {
+    name = data['name'] as String? ?? '';
+    age = (data['age'] as num?)?.toInt() ?? 0;
+    height = (data['height'] as num?)?.toDouble() ?? 0;
+    weight = (data['weight'] as num?)?.toDouble() ?? 0;
+    final savedFormula = data['formulaSetting'] as String?;
+    formulaSetting = const ['Female', 'Male', 'Average'].contains(savedFormula)
+        ? savedFormula!
+        : 'Average';
+    final savedActivity = (data['activity'] as num?)?.toDouble();
+    activity = const [1.2, 1.375, 1.55, 1.725].contains(savedActivity)
+        ? savedActivity!
+        : 1.2;
+    final savedGoal = data['goal'] as String?;
+    goal = const ['Lose weight', 'Maintain weight', 'Gain weight']
+            .contains(savedGoal)
+        ? savedGoal!
+        : 'Maintain weight';
+    goalWeight = (data['goalWeight'] as num?)?.toDouble();
+  }
 }
 
 class MacroTrackApp extends StatefulWidget {
@@ -139,8 +209,10 @@ class MacroTrackApp extends StatefulWidget {
 class _MacroTrackAppState extends State<MacroTrackApp> {
   bool signedIn = false;
   bool sessionLoaded = false;
+  bool profileConfigured = false;
   int tab = 0;
   static const _demoSessionKey = 'macrolens.demo.signed_in';
+  static const _profileKey = 'macrolens.profile.v1';
   final profile = HealthProfile();
   final entries = <MealEntry>[];
   DateTime selectedDay = DateTime.now();
@@ -156,21 +228,37 @@ class _MacroTrackAppState extends State<MacroTrackApp> {
     try {
       final preferences = await SharedPreferences.getInstance();
       restoredSession = preferences.getBool(_demoSessionKey) ?? false;
+      final savedProfile = preferences.getString(_profileKey);
+      if (savedProfile != null) {
+        final decoded = jsonDecode(savedProfile);
+        if (decoded is Map<String, dynamic>) profile.restore(decoded);
+      }
     } catch (_) {
-      // If local storage is unavailable, fall back to the sign-in screen.
+      // If local storage is unavailable, use the profile setup flow again.
     }
     if (!mounted) return;
     setState(() {
       signedIn = restoredSession;
+      profileConfigured = profile.isComplete;
       sessionLoaded = true;
     });
   }
 
-  Future<void> _continueDemo() async {
+  Future<void> _continueDemo(String? displayName) async {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setBool(_demoSessionKey, true);
+    if (!profileConfigured && (displayName ?? '').trim().isNotEmpty) {
+      profile.name = displayName!.trim();
+    }
     if (!mounted) return;
     setState(() => signedIn = true);
+  }
+
+  Future<void> _saveProfile() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_profileKey, jsonEncode(profile.toJson()));
+    if (!mounted) return;
+    setState(() => profileConfigured = profile.isComplete);
   }
 
   Future<void> _signOut() async {
@@ -223,68 +311,72 @@ class _MacroTrackAppState extends State<MacroTrackApp> {
           ? const Scaffold(
               body: Center(child: CircularProgressIndicator(color: green)))
           : signedIn
-              ? Scaffold(
-                  body: SafeArea(
-                      child: IndexedStack(index: tab, children: [
-                    Dashboard(
-                        day: selectedDay,
-                        entries: todays,
-                        allEntries: entries,
-                        kcal: kcal,
-                        protein: protein,
-                        carbs: carbs,
-                        fat: fat,
-                        profile: profile,
-                        onScan: () => setState(() => tab = 1),
-                        onDate: changeDay,
-                        onAdd: add,
-                        onRemove: remove,
-                        onShowLog: () => setState(() => tab = 2)),
-                    ScannerPage(onAdd: (e) {
-                      add(e);
-                      changeDay(e.date);
-                      setState(() => tab = 0);
-                    }),
-                    FoodLogPage(
-                        day: selectedDay,
-                        entries: todays,
-                        onDate: changeDay,
-                        onAdd: add,
-                        onRemove: remove),
-                    ProfilePage(
-                        profile: profile,
-                        onSaved: () => setState(() {}),
-                        onSignOut: _signOut)
-                  ])),
-                  bottomNavigationBar: NavigationBar(
-                      selectedIndex: tab,
-                      onDestinationSelected: (i) => setState(() => tab = i),
-                      backgroundColor: Colors.white,
-                      indicatorColor: lime,
-                      destinations: const [
-                        NavigationDestination(
-                            icon: Icon(Icons.home_outlined),
-                            selectedIcon: Icon(Icons.home_rounded),
-                            label: 'Today'),
-                        NavigationDestination(
-                            icon: Icon(Icons.document_scanner_outlined),
-                            selectedIcon: Icon(Icons.document_scanner_rounded),
-                            label: 'Scanner'),
-                        NavigationDestination(
-                            icon: Icon(Icons.restaurant_menu_outlined),
-                            selectedIcon: Icon(Icons.restaurant_menu),
-                            label: 'Food log'),
-                        NavigationDestination(
-                            icon: Icon(Icons.person_outline_rounded),
-                            selectedIcon: Icon(Icons.person_rounded),
-                            label: 'Profile')
-                      ]))
+              ? !profileConfigured
+                  ? ProfileEditorPage(
+                      profile: profile, isSetup: true, onSave: _saveProfile)
+                  : Scaffold(
+                      body: SafeArea(
+                          child: IndexedStack(index: tab, children: [
+                        Dashboard(
+                            day: selectedDay,
+                            entries: todays,
+                            allEntries: entries,
+                            kcal: kcal,
+                            protein: protein,
+                            carbs: carbs,
+                            fat: fat,
+                            profile: profile,
+                            onScan: () => setState(() => tab = 1),
+                            onDate: changeDay,
+                            onAdd: add,
+                            onRemove: remove,
+                            onShowLog: () => setState(() => tab = 2)),
+                        ScannerPage(onAdd: (e) {
+                          add(e);
+                          changeDay(e.date);
+                          setState(() => tab = 0);
+                        }),
+                        FoodLogPage(
+                            day: selectedDay,
+                            entries: todays,
+                            onDate: changeDay,
+                            onAdd: add,
+                            onRemove: remove),
+                        ProfilePage(
+                            profile: profile,
+                            onSaved: _saveProfile,
+                            onSignOut: _signOut)
+                      ])),
+                      bottomNavigationBar: NavigationBar(
+                          selectedIndex: tab,
+                          onDestinationSelected: (i) => setState(() => tab = i),
+                          backgroundColor: Colors.white,
+                          indicatorColor: lime,
+                          destinations: const [
+                            NavigationDestination(
+                                icon: Icon(Icons.home_outlined),
+                                selectedIcon: Icon(Icons.home_rounded),
+                                label: 'Today'),
+                            NavigationDestination(
+                                icon: Icon(Icons.document_scanner_outlined),
+                                selectedIcon:
+                                    Icon(Icons.document_scanner_rounded),
+                                label: 'Scanner'),
+                            NavigationDestination(
+                                icon: Icon(Icons.restaurant_menu_outlined),
+                                selectedIcon: Icon(Icons.restaurant_menu),
+                                label: 'Food log'),
+                            NavigationDestination(
+                                icon: Icon(Icons.person_outline_rounded),
+                                selectedIcon: Icon(Icons.person_rounded),
+                                label: 'Profile')
+                          ]))
               : LoginPage(onContinue: _continueDemo));
 }
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key, required this.onContinue});
-  final Future<void> Function() onContinue;
+  final Future<void> Function(String? displayName) onContinue;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -292,6 +384,7 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final formKey = GlobalKey<FormState>();
+  final name = TextEditingController();
   final email = TextEditingController();
   final password = TextEditingController();
   bool accepted = false;
@@ -301,6 +394,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
+    name.dispose();
     email.dispose();
     password.dispose();
     super.dispose();
@@ -311,7 +405,7 @@ class _LoginPageState extends State<LoginPage> {
     password.clear();
     setState(() => submitting = true);
     try {
-      await widget.onContinue();
+      await widget.onContinue(register ? name.text.trim() : null);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -369,6 +463,7 @@ class _LoginPageState extends State<LoginPage> {
                       const SizedBox(height: 25),
                       if (register) ...[
                         TextFormField(
+                          controller: name,
                           textCapitalization: TextCapitalization.words,
                           decoration: const InputDecoration(
                               labelText: 'Your name',
@@ -582,7 +677,7 @@ const _termsSections = <(String, String)>[
   ),
   (
     'Availability and changes',
-    'This prototype is provided for testing and may be changed or unavailable at any time. Data can be lost when the app closes or is reinstalled.'
+    'This prototype is provided for testing and may be changed or unavailable at any time. Profile information is saved locally on the device; meal logs are currently held in memory and can be lost when the app closes.'
   ),
   (
     'Contact',
@@ -593,7 +688,7 @@ const _termsSections = <(String, String)>[
 const _privacySections = <(String, String)>[
   (
     'Prototype and account data',
-    'The app has no authentication backend or cloud database. Login fields are used only for local form validation; the entered email and password are not sent or saved. A simple sign-in flag is stored on this device so the demo stays signed in. Meal entries and profile settings exist in app memory and may be lost when the app closes.'
+    'The app has no authentication backend or cloud database. Login fields are used only for local form validation; the entered email and password are not sent or saved. A simple sign-in flag and profile details (name, age, height, weight, selected goal, activity and formula setting) are saved in local app preferences on this device and are not uploaded to the MacroLens scanner. Meal entries remain in app memory and may be lost when the app closes. Clearing app data or uninstalling removes locally saved profile details.'
   ),
   (
     'Food photos and AI scanning',
@@ -647,6 +742,12 @@ class Dashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final meals = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
+    final hour = DateTime.now().hour;
+    final greeting = hour < 12
+        ? 'Good morning'
+        : hour < 17
+            ? 'Good afternoon'
+            : 'Good evening';
     return ListView(
         padding: const EdgeInsets.fromLTRB(20, 15, 20, 22),
         children: [
@@ -680,11 +781,13 @@ class Dashboard extends StatelessWidget {
                   letterSpacing: 1.2,
                   fontWeight: FontWeight.w700)),
           const SizedBox(height: 3),
-          const Text('Good morning, Alex',
-              style: TextStyle(
+          Text('$greeting, ${profile.name}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
                   color: ink, fontSize: 24, fontWeight: FontWeight.w800)),
           const SizedBox(height: 3),
-          const Text('You’re on track. Let’s log what you eat.',
+          const Text('Let’s log what you eat.',
               style: TextStyle(color: muted, fontSize: 12)),
           const SizedBox(height: 14),
           Container(
@@ -723,7 +826,9 @@ class Dashboard extends StatelessWidget {
                                                 color: muted, fontSize: 11)))
                                   ]),
                               Text(
-                                  'of ${profile.calories.toStringAsFixed(0)} kcal goal',
+                                  profile.canEstimateCalories
+                                      ? 'of ${profile.calories.toStringAsFixed(0)} kcal goal'
+                                      : 'Daily target unavailable for this age',
                                   style: const TextStyle(
                                       color: muted, fontSize: 11))
                             ]),
@@ -751,14 +856,15 @@ class Dashboard extends StatelessWidget {
                       )
                     ]),
                     const SizedBox(height: 15),
-                    Row(children: [
-                      _Macro('Protein', protein, profile.proteinGoal, 'g',
-                          const Color(0xFF1B5E20)),
-                      _Macro('Carbs', carbs, profile.carbsGoal, 'g',
-                          const Color(0xFF2E7D32)),
-                      _Macro('Fat', fat, profile.fatGoal, 'g',
-                          const Color(0xFF00695C))
-                    ])
+                    if (profile.canEstimateCalories)
+                      Row(children: [
+                        _Macro('Protein', protein, profile.proteinGoal, 'g',
+                            const Color(0xFF1B5E20)),
+                        _Macro('Carbs', carbs, profile.carbsGoal, 'g',
+                            const Color(0xFF2E7D32)),
+                        _Macro('Fat', fat, profile.fatGoal, 'g',
+                            const Color(0xFF00695C))
+                      ])
                   ])),
           const SizedBox(height: 18),
           Row(children: [
@@ -1376,7 +1482,7 @@ class ProfilePage extends StatelessWidget {
       required this.onSaved,
       required this.onSignOut});
   final HealthProfile profile;
-  final VoidCallback onSaved;
+  final Future<void> Function() onSaved;
   final VoidCallback onSignOut;
   @override
   Widget build(BuildContext context) =>
@@ -1385,7 +1491,7 @@ class ProfilePage extends StatelessWidget {
             style: TextStyle(
                 color: ink, fontSize: 25, fontWeight: FontWeight.w800)),
         const SizedBox(height: 6),
-        const Text('Set your details to estimate a daily calorie goal.',
+        const Text('Your details and daily nutrition goals.',
             style: TextStyle(color: muted, fontSize: 12)),
         const SizedBox(height: 16),
         Card(
@@ -1393,31 +1499,55 @@ class ProfilePage extends StatelessWidget {
             elevation: 0,
             child: ListTile(
                 leading: const Icon(Icons.person_outline, color: green),
-                title: Text('${profile.age} years · ${profile.sex}',
+                title: Text(profile.name,
                     style: const TextStyle(
                         color: ink, fontWeight: FontWeight.w700)),
                 subtitle: Text(
-                    '${profile.height.toStringAsFixed(0)} cm · ${profile.weight.toStringAsFixed(1)} kg'),
+                    '${profile.age} years · ${profile.height.toStringAsFixed(0)} cm · ${profile.weight.toStringAsFixed(1)} kg\n${profile.goal}${profile.goalWeight == null ? '' : ' · goal ${profile.goalWeight!.toStringAsFixed(1)} kg'}'),
+                isThreeLine: true,
                 trailing: const Icon(Icons.edit_outlined, color: muted),
-                onTap: () => editProfile(context, profile, onSaved))),
+                onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(
+                    builder: (_) => ProfileEditorPage(
+                        profile: profile, onSave: onSaved))))),
         const SizedBox(height: 10),
         Card(
             color: ink,
             child: ListTile(
-                title: const Text('Estimated daily calories',
+                title: Text(
+                    profile.canEstimateCalories
+                        ? 'Estimated daily calorie goal'
+                        : 'Calorie goal not estimated',
                     style: TextStyle(color: Colors.white)),
                 subtitle: Text(
-                    '${profile.calories.toStringAsFixed(0)} kcal · Mifflin-St Jeor × activity',
+                    profile.canEstimateCalories
+                        ? '${profile.calories.toStringAsFixed(0)} kcal · ${profile.goal} · ${profile.activityLabel}'
+                        : 'Personalized calorie targets are for adults 18 and older.',
                     style: const TextStyle(color: lime)),
                 leading: const Icon(Icons.bolt, color: lime))),
+        if (profile.canEstimateCalories) ...[
+          const SizedBox(height: 18),
+          const Text('Daily macro targets',
+              style: TextStyle(
+                  color: ink, fontWeight: FontWeight.w800, fontSize: 16)),
+          const SizedBox(height: 8),
+          Text(
+              'Protein ${profile.proteinGoal.toStringAsFixed(0)} g · Carbohydrates ${profile.carbsGoal.toStringAsFixed(0)} g · Fat ${profile.fatGoal.toStringAsFixed(0)} g',
+              style: const TextStyle(color: muted)),
+        ],
         const SizedBox(height: 18),
-        const Text('Daily macro targets',
-            style: TextStyle(
-                color: ink, fontWeight: FontWeight.w800, fontSize: 16)),
+        if (profile.canEstimateCalories) ...[
+          Text(
+              'Activity: ${profile.activityLabel} · BMR formula setting: ${profile.formulaSetting}',
+              style: const TextStyle(color: muted, fontSize: 12)),
+          const SizedBox(height: 5),
+          Text(
+              'Uses the Mifflin-St Jeor estimate with a ${profile.goalAdjustment == 0 ? '0' : profile.goalAdjustment > 0 ? '+' : ''}${profile.goalAdjustment.toStringAsFixed(0)} kcal goal adjustment. Macro split: 30% protein, 40% carbohydrates, 30% fat.',
+              style: const TextStyle(color: muted, fontSize: 11)),
+        ],
         const SizedBox(height: 8),
-        Text(
-            'Protein ${profile.proteinGoal.toStringAsFixed(0)} g · Carbohydrates ${profile.carbsGoal.toStringAsFixed(0)} g · Fat ${profile.fatGoal.toStringAsFixed(0)} g',
-            style: const TextStyle(color: muted)),
+        const Text(
+            'Targets are rough estimates for adults. They are not intended for pregnancy, breastfeeding, or medical nutrition plans.',
+            style: TextStyle(color: muted, fontSize: 11)),
         const SizedBox(height: 18),
         const Text('About MacroLens',
             style: TextStyle(
@@ -1448,8 +1578,7 @@ class ProfilePage extends StatelessWidget {
             icon: const Icon(Icons.logout_rounded),
             label: const Text('Sign out of this device')),
         const SizedBox(height: 12),
-        const Text(
-            'Targets are estimates for general tracking, not medical advice.',
+        const Text('Profile details are stored on this device only.',
             style: TextStyle(color: muted, fontSize: 11))
       ]);
 }
@@ -1522,90 +1651,273 @@ Future<void> manualAdd(
     onAdd(MealEntry(food: food!, grams: g, category: meal));
 }
 
-Future<void> editProfile(
-    BuildContext context, HealthProfile p, VoidCallback onSaved) async {
-  final age = TextEditingController(text: '${p.age}'),
-      height = TextEditingController(text: '${p.height}'),
-      weight = TextEditingController(text: '${p.weight}');
-  String sex = p.sex;
-  double activity = p.activity;
-  final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-          builder: (ctx, refresh) => AlertDialog(
-                  title: const Text('Personal nutrition profile'),
-                  content: SingleChildScrollView(
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    DropdownButtonFormField<String>(
-                        initialValue: sex,
-                        decoration: const InputDecoration(
-                            labelText: 'Sex for BMR formula'),
-                        items: const ['Female', 'Male']
-                            .map((s) =>
-                                DropdownMenuItem(value: s, child: Text(s)))
-                            .toList(),
-                        onChanged: (v) => refresh(() => sex = v ?? sex)),
-                    TextField(
-                        controller: age,
-                        keyboardType: TextInputType.number,
-                        decoration:
-                            const InputDecoration(labelText: 'Age (years)')),
-                    TextField(
-                        controller: height,
-                        keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
-                        decoration:
-                            const InputDecoration(labelText: 'Height (cm)')),
-                    TextField(
-                        controller: weight,
-                        keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
-                        decoration:
-                            const InputDecoration(labelText: 'Weight (kg)')),
-                    DropdownButtonFormField<double>(
-                        initialValue: activity,
-                        decoration:
-                            const InputDecoration(labelText: 'Activity level'),
-                        items: {
-                          1.2: 'Sedentary',
-                          1.375: 'Light',
-                          1.55: 'Moderate',
-                          1.725: 'High'
-                        }
-                            .entries
-                            .map((e) => DropdownMenuItem(
-                                value: e.key, child: Text(e.value)))
-                            .toList(),
-                        onChanged: (v) =>
-                            refresh(() => activity = v ?? activity))
-                  ])),
-                  actions: [
-                    TextButton(
-                        onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('Cancel')),
-                    FilledButton(
-                        onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Save'))
-                  ])));
-  if (ok == true) {
-    final a = int.tryParse(age.text),
-        h = double.tryParse(height.text),
-        w = double.tryParse(weight.text);
-    if (a != null &&
-        a >= 13 &&
-        a <= 110 &&
-        h != null &&
-        h >= 100 &&
-        h <= 250 &&
-        w != null &&
-        w >= 30 &&
-        w <= 350) {
-      p.sex = sex;
-      p.age = a;
-      p.height = h;
-      p.weight = w;
-      p.activity = activity;
-      onSaved();
+class ProfileEditorPage extends StatefulWidget {
+  const ProfileEditorPage(
+      {super.key,
+      required this.profile,
+      required this.onSave,
+      this.isSetup = false});
+  final HealthProfile profile;
+  final Future<void> Function() onSave;
+  final bool isSetup;
+
+  @override
+  State<ProfileEditorPage> createState() => _ProfileEditorPageState();
+}
+
+class _ProfileEditorPageState extends State<ProfileEditorPage> {
+  final formKey = GlobalKey<FormState>();
+  late final name = TextEditingController(text: widget.profile.name);
+  late final age = TextEditingController(
+      text: widget.profile.age == 0 ? '' : '${widget.profile.age}');
+  late final height = TextEditingController(
+      text: widget.profile.height == 0 ? '' : '${widget.profile.height}');
+  late final weight = TextEditingController(
+      text: widget.profile.weight == 0 ? '' : '${widget.profile.weight}');
+  late final goalWeight =
+      TextEditingController(text: widget.profile.goalWeight?.toString() ?? '');
+  late String formulaSetting = widget.profile.formulaSetting;
+  late String goal = widget.profile.goal;
+  late double activity = widget.profile.activity;
+  bool saving = false;
+
+  @override
+  void dispose() {
+    name.dispose();
+    age.dispose();
+    height.dispose();
+    weight.dispose();
+    goalWeight.dispose();
+    super.dispose();
+  }
+
+  double? parseNumber(String value) =>
+      double.tryParse(value.trim().replaceAll(',', '.'));
+
+  Future<void> submit() async {
+    if (saving || !(formKey.currentState?.validate() ?? false)) return;
+    final ageValue = int.parse(age.text.trim());
+    final heightValue = parseNumber(height.text)!;
+    final weightValue = parseNumber(weight.text)!;
+    final targetValue =
+        goal == 'Maintain weight' || goalWeight.text.trim().isEmpty
+            ? null
+            : parseNumber(goalWeight.text);
+
+    widget.profile
+      ..name = name.text.trim()
+      ..age = ageValue
+      ..height = heightValue
+      ..weight = weightValue
+      ..goal = goal
+      ..goalWeight = targetValue
+      ..formulaSetting = formulaSetting
+      ..activity = activity;
+
+    setState(() => saving = true);
+    try {
+      await widget.onSave();
+      if (!mounted) return;
+      if (!widget.isSetup) Navigator.of(context).pop();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not save your profile. Please try again.')));
+      setState(() => saving = false);
     }
   }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(
+          automaticallyImplyLeading: !widget.isSetup,
+          backgroundColor: canvas,
+          title: Text(widget.isSetup ? 'Set up your profile' : 'Edit profile'),
+        ),
+        body: Form(
+          key: formKey,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            children: [
+              Text(
+                  widget.isSetup
+                      ? 'A few details help MacroLens estimate your daily targets.'
+                      : 'Update your details and nutrition goal.',
+                  style: const TextStyle(color: muted, fontSize: 13)),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: name,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.next,
+                maxLength: 60,
+                decoration: const InputDecoration(
+                    labelText: 'Name', prefixIcon: Icon(Icons.person_outline)),
+                validator: (value) {
+                  final text = (value ?? '').trim();
+                  if (text.isEmpty) return 'Enter your name.';
+                  if (text.length > 60) return 'Use 60 characters or fewer.';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: age,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Age (years)'),
+                validator: (value) {
+                  final parsed = int.tryParse((value ?? '').trim());
+                  if (parsed == null || parsed < 13 || parsed > 110) {
+                    return 'Enter an age from 13 to 110.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: height,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                        labelText: 'Height', suffixText: 'cm'),
+                    validator: (value) {
+                      final parsed = parseNumber(value ?? '');
+                      if (parsed == null || parsed < 100 || parsed > 250) {
+                        return 'Use 100–250 cm.';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextFormField(
+                    controller: weight,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                        labelText: 'Current weight', suffixText: 'kg'),
+                    validator: (value) {
+                      final parsed = parseNumber(value ?? '');
+                      if (parsed == null || parsed < 30 || parsed > 350) {
+                        return 'Use 30–350 kg.';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: goal,
+                decoration: const InputDecoration(
+                    labelText: 'Your goal',
+                    prefixIcon: Icon(Icons.flag_outlined)),
+                items: const [
+                  DropdownMenuItem(
+                      value: 'Lose weight', child: Text('Lose weight')),
+                  DropdownMenuItem(
+                      value: 'Maintain weight', child: Text('Maintain weight')),
+                  DropdownMenuItem(
+                      value: 'Gain weight', child: Text('Gain weight')),
+                ],
+                onChanged: (value) => setState(() => goal = value ?? goal),
+              ),
+              if (goal != 'Maintain weight') ...[
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: goalWeight,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                      labelText: 'Goal weight (optional)', suffixText: 'kg'),
+                  validator: (value) {
+                    final text = (value ?? '').trim();
+                    if (text.isEmpty) return null;
+                    final parsed = parseNumber(text);
+                    final current = parseNumber(weight.text);
+                    if (parsed == null || parsed < 30 || parsed > 350) {
+                      return 'Use 30–350 kg.';
+                    }
+                    if (current != null &&
+                        ((goal == 'Lose weight' && parsed >= current) ||
+                            (goal == 'Gain weight' && parsed <= current))) {
+                      return goal == 'Lose weight'
+                          ? 'For this goal, enter a lower weight.'
+                          : 'For this goal, enter a higher weight.';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+              const SizedBox(height: 12),
+              DropdownButtonFormField<double>(
+                initialValue: activity,
+                decoration: const InputDecoration(
+                    labelText: 'Usual activity level',
+                    prefixIcon: Icon(Icons.directions_walk_outlined)),
+                items: const [
+                  DropdownMenuItem(value: 1.2, child: Text('Mostly sitting')),
+                  DropdownMenuItem(value: 1.375, child: Text('Light activity')),
+                  DropdownMenuItem(
+                      value: 1.55, child: Text('Moderate activity')),
+                  DropdownMenuItem(value: 1.725, child: Text('Very active')),
+                ],
+                onChanged: (value) =>
+                    setState(() => activity = value ?? activity),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: formulaSetting,
+                decoration: const InputDecoration(
+                    labelText: 'BMR formula setting',
+                    prefixIcon: Icon(Icons.tune_rounded)),
+                items: const [
+                  DropdownMenuItem(value: 'Female', child: Text('Female')),
+                  DropdownMenuItem(value: 'Male', child: Text('Male')),
+                  DropdownMenuItem(value: 'Average', child: Text('Average')),
+                ],
+                onChanged: (value) =>
+                    setState(() => formulaSetting = value ?? formulaSetting),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 5, left: 12),
+                child: Text(
+                    'This setting is only used by the calorie equation; it is not a gender identity field.',
+                    style: TextStyle(color: muted, fontSize: 11)),
+              ),
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                    color: lime, borderRadius: BorderRadius.circular(13)),
+                child: const Text(
+                    'Targets are rough estimates for adults 18+. They are not intended for pregnancy, breastfeeding, or medical nutrition plans. Profile details are saved on this device only.',
+                    style: TextStyle(color: muted, fontSize: 11, height: 1.4)),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 50,
+                child: FilledButton(
+                  onPressed: saving ? null : submit,
+                  style: FilledButton.styleFrom(
+                      backgroundColor: green, foregroundColor: Colors.white),
+                  child: saving
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : Text(widget.isSetup ? 'Save profile' : 'Save changes',
+                          style: const TextStyle(fontWeight: FontWeight.w800)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
 }
