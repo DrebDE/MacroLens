@@ -570,7 +570,7 @@ const _termsSections = <(String, String)>[
   ),
   (
     'Nutrition information',
-    'Food recognition, portion estimates, calorie totals, and macro values are approximate and may be incomplete or wrong. The image model only suggests food labels; displayed nutrition is calculated from the sample food catalog after you confirm a match and portion.'
+    'Food recognition, visual portion estimates, calorie totals, and macro values are approximate and may be incomplete or wrong. For foods outside the sample catalog, Nouri estimates generic nutrition values. Confirm the food and edit the estimated amount before logging; a photo is not a scale measurement.'
   ),
   (
     'Not medical advice',
@@ -597,7 +597,7 @@ const _privacySections = <(String, String)>[
   ),
   (
     'Food photos and AI scanning',
-    'When you tap Identify food with AI, the selected food photo is sent from your phone over HTTPS to the hosted MacroLens scanner. That service forwards the image and a food-identification prompt to Google Gemini API, then returns candidate food names, portion suggestions, and approximate nutrition values per 100 grams. Do not scan people, documents, or sensitive images.'
+    'When you tap Scan with Nouri, the selected photo is sent from your phone over HTTPS to the hosted MacroLens scanner. Nouri is instructed to process edible food only and reject non-food or unclear images. The scanner forwards the image to Google Gemini API and returns a food match, a visual portion estimate and range, and approximate nutrition values per 100 grams. This guardrail can still make mistakes. Scan one food or mixed dish at a time; do not scan people, documents, materials, or sensitive images.'
   ),
   (
     'Google Gemini and free use',
@@ -605,7 +605,7 @@ const _privacySections = <(String, String)>[
   ),
   (
     'Nutrition calculations',
-    'For catalog foods, the app calculates nutrition locally from catalog values. For unmatched foods, Gemini provides approximate generic values per 100 grams and the app scales them to your confirmed portion. Meal logs are not sent to the Gemini model. AI and catalog estimates are informational and can be inaccurate.'
+    'For catalog foods, the app calculates nutrition locally from catalog values. For unmatched foods, Gemini provides approximate generic values per 100 grams and the app scales them to your confirmed portion. The visual gram range is a guide, not a measurement; adjust the amount to what you ate. Meal logs are not sent to the Gemini model. AI and catalog estimates are informational and can be inaccurate.'
   ),
   (
     'Retention and deletion',
@@ -976,6 +976,7 @@ class _ScannerPageState extends State<ScannerPage> {
   bool busy = false;
   String? error, detected;
   double confidence = 0;
+  double? portionLowGrams, portionHighGrams;
   Food? selectedFood, aiEstimate;
   String meal = 'Lunch', unit = 'g';
   @override
@@ -995,6 +996,8 @@ class _ScannerPageState extends State<ScannerPage> {
           detected = null;
           selectedFood = null;
           aiEstimate = null;
+          portionLowGrams = null;
+          portionHighGrams = null;
         });
       }
     } catch (e) {
@@ -1043,16 +1046,27 @@ class _ScannerPageState extends State<ScannerPage> {
         throw Exception(detail);
       }
       final body = jsonDecode(response.body) as Map<String, dynamic>;
-      final first = (body['items'] as List).first as Map<String, dynamic>;
+      final items = body['items'] as List? ?? const [];
+      if (body['food_detected'] != true || items.isEmpty) {
+        throw Exception(
+            'Nouri scans food only. Try a clear photo showing edible food.');
+      }
+      final first = items.first as Map<String, dynamic>;
       final label = first['food_name'] as String;
       final found = matchFood(label);
       final estimate = aiFoodFromResult(label, first['nutrition_per_100g']);
       final suggestedGrams = (first['portion_guess_g'] as num?)?.toDouble();
+      final lowGrams = (first['portion_low_g'] as num?)?.toDouble();
+      final highGrams = (first['portion_high_g'] as num?)?.toDouble();
       setState(() {
         detected = label;
-        confidence = ((first['confidence'] as num?)?.toDouble() ?? .65);
+        confidence = ((first['confidence'] as num?)?.toDouble() ?? .65)
+            .clamp(0.0, .95)
+            .toDouble();
         aiEstimate = estimate;
         selectedFood = found ?? estimate;
+        portionLowGrams = lowGrams;
+        portionHighGrams = highGrams;
         if (suggestedGrams != null &&
             suggestedGrams.isFinite &&
             suggestedGrams > 0 &&
@@ -1071,6 +1085,11 @@ class _ScannerPageState extends State<ScannerPage> {
     } finally {
       if (mounted) setState(() => busy = false);
     }
+  }
+
+  String formatPortion(double gramsValue) {
+    final amount = unit == 'oz' ? gramsValue / 28.3495 : gramsValue;
+    return '${amount.round()} ${unit == 'oz' ? 'oz' : 'g'}';
   }
 
   void addFood() {
@@ -1094,7 +1113,7 @@ class _ScannerPageState extends State<ScannerPage> {
             style: TextStyle(
                 color: ink, fontSize: 25, fontWeight: FontWeight.w800)),
         const SizedBox(height: 5),
-        const Text('Take a photo and let Nouri estimate your macros.',
+        const Text('Scan one food or mixed dish; Nouri estimates its macros.',
             style: TextStyle(color: muted, fontSize: 12)),
         const SizedBox(height: 18),
         Container(
@@ -1166,7 +1185,7 @@ class _ScannerPageState extends State<ScannerPage> {
                             TextStyle(color: ink, fontWeight: FontWeight.w800)),
                     const SizedBox(height: 6),
                     Text(
-                        'Nouri identified $detected (${(confidence * 100).toStringAsFixed(0)}% confidence). Choose catalog values or use the approximate Nouri macro estimate.',
+                        'Nouri food match: $detected (${(confidence * 100).toStringAsFixed(0)}% match confidence). Portion and macros are estimates.',
                         style: const TextStyle(color: muted, fontSize: 11)),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<Food>(
@@ -1199,7 +1218,7 @@ class _ScannerPageState extends State<ScannerPage> {
                                   const TextInputType.numberWithOptions(
                                       decimal: true),
                               decoration: const InputDecoration(
-                                  labelText: 'Portion amount',
+                                  labelText: 'Estimated amount',
                                   border: OutlineInputBorder())),
                         ),
                         const SizedBox(width: 9),
@@ -1232,6 +1251,19 @@ class _ScannerPageState extends State<ScannerPage> {
                                     setState(() => unit = v ?? 'g')))
                       ]);
                     }),
+                    if (portionLowGrams != null && portionHighGrams != null)
+                      Padding(
+                          padding: const EdgeInsets.only(top: 7),
+                          child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                  color: lime,
+                                  borderRadius: BorderRadius.circular(10)),
+                              child: Text(
+                                  'Visual portion range: ${formatPortion(portionLowGrams!)}–${formatPortion(portionHighGrams!)}. Adjust the amount to match what you ate.',
+                                  style: const TextStyle(
+                                      color: muted, fontSize: 10)))),
                     const SizedBox(height: 9),
                     DropdownButtonFormField<String>(
                         initialValue: meal,
@@ -1264,7 +1296,7 @@ class _ScannerPageState extends State<ScannerPage> {
         ],
         const SizedBox(height: 10),
         const Text(
-            'Nouri’s image and macro estimates are approximate. Confirm the food and serving size before logging.',
+            'Nouri only scans food. The match, portion, and macro values are estimates—not scale measurements. Scan one food or mixed dish at a time.',
             style: TextStyle(color: muted, fontSize: 10))
       ]);
 }

@@ -78,7 +78,9 @@ $env:GEMINI_API_KEY="your-key"
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The Gemini endpoint returns food names, visual confidence, and a rough portion suggestion. The interaction is configured with `store=False`; unpaid Gemini API usage may still be used by Google to improve its services and may be reviewed under Google's terms. See the in-app Privacy Policy and [Gemini API terms](https://ai.google.dev/gemini-api/terms). The app asks the user to confirm a food catalog match and serving weight, then computes nutrition from per-100-gram entries. Use the manual entry flow if the scanner service is unavailable or the food is missing from the sample catalog.
+The Gemini endpoint has a food-only gate: it rejects non-food or unclear images, ignores non-food objects in a food photo, and returns one main food or mixed dish per scan. It estimates a starting portion and a plausible visual gram range using visible size and serving cues; users can adjust the amount before logging. Confidence is only for identifying the food, is capped below 100%, and does not indicate macro or weight accuracy. The app scales typical per-100-gram nutrition values to the chosen portion. These are useful estimates, not scale measurements or guaranteed exact values. For best results, scan one food or mixed dish at a time and confirm the result.
+
+The interaction is configured with `store=False`; unpaid Gemini API usage may still be used by Google to improve its services and may be reviewed under Google's terms. See the in-app Privacy Policy and [Gemini API terms](https://ai.google.dev/gemini-api/terms). Use the manual entry flow if the scanner service is unavailable or the food is missing from the sample catalog.
 
 ## Prototype scope
 
@@ -89,4 +91,4 @@ The Gemini endpoint returns food names, visual confidence, and a rough portion s
 - Green MacroLens sign-in and registration prototype with in-app Terms of Service and Privacy Policy drafts. Authentication is not connected; email/password are not verified, transmitted, or stored. A device-only flag remembers the demo sign-in until the user signs out or removes the app.
 - Data is in memory for this prototype; cloud persistence and a comprehensive nutrition database are not connected yet.
 
-Photo portion estimates are approximate. Always confirm the serving size and database match.
+Photo portion estimates are approximate. Always confirm the food and adjust the suggested grams to your best estimate of what you ate.
