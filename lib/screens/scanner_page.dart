@@ -733,7 +733,7 @@ class _ScannerPageState extends State<ScannerPage> {
             child: FilledButton.icon(
               onPressed: addFood,
               icon: const Icon(Icons.add_rounded),
-              label: Text('Add to $meal'),
+              label: const Text('Add food'),
             ),
           ),
         ],

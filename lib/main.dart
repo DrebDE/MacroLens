@@ -201,6 +201,7 @@ class _MacroLensAppState extends State<MacroLensApp> {
                                 profile: profile,
                                 onDay: (day) =>
                                     setState(() => selectedDay = dateOnly(day)),
+                                onScan: () => setState(() => tab = 1),
                                 onAdd: _addEntry,
                                 onRemove: _removeEntry,
                               ),

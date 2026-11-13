@@ -143,14 +143,9 @@ class TodayPage extends StatelessWidget {
                     SizedBox(
                       height: 38,
                       child: FilledButton.icon(
-                        onPressed: () => openManualAdd(
-                          context,
-                          day: day,
-                          onAdd: onAdd,
-                          meal: defaultMealForNow(),
-                        ),
+                        onPressed: onScan,
                         icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('Log food'),
+                        label: const Text('Add food'),
                         style: FilledButton.styleFrom(
                           minimumSize: const Size(0, 38),
                           padding: const EdgeInsets.symmetric(horizontal: 14),

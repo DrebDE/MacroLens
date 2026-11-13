@@ -12,6 +12,7 @@ class FoodLogPage extends StatefulWidget {
     required this.entries,
     required this.profile,
     required this.onDay,
+    required this.onScan,
     required this.onAdd,
     required this.onRemove,
   });
@@ -20,6 +21,7 @@ class FoodLogPage extends StatefulWidget {
   final List<MealEntry> entries;
   final HealthProfile profile;
   final ValueChanged<DateTime> onDay;
+  final VoidCallback onScan;
   final ValueChanged<MealEntry> onAdd;
   final ValueChanged<MealEntry> onRemove;
 
@@ -98,7 +100,7 @@ class _FoodLogPageState extends State<FoodLogPage> {
         ),
         const SizedBox(height: 3),
         const Text(
-          'Review your meals and progress by date.',
+          'Review meals or add food to your day.',
           style: TextStyle(color: AppColors.muted, fontSize: 12),
         ),
         const SizedBox(height: 12),
@@ -175,16 +177,11 @@ class _FoodLogPageState extends State<FoodLogPage> {
             icon: Icons.restaurant_outlined,
             title: 'Nothing logged for this day',
             message:
-                'Add food from the catalog or create a custom food. You can also scan a photo from the Scanner tab.',
+                'Scan a meal or enter food manually to add it to your log.',
             actions: [
               OutlinedButton.icon(
-                onPressed: () => openManualAdd(
-                  context,
-                  day: widget.day,
-                  onAdd: widget.onAdd,
-                  meal: defaultMealForNow(),
-                ),
-                icon: const Icon(Icons.add_rounded, size: 18),
+                onPressed: widget.onScan,
+                icon: const Icon(Icons.document_scanner_outlined, size: 18),
                 label: const Text('Add food'),
               ),
             ],
@@ -205,16 +202,28 @@ class _FoodLogPageState extends State<FoodLogPage> {
               onRemove: widget.onRemove,
             ),
         const SizedBox(height: 4),
+        if (dayEntries.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 50,
+            child: FilledButton.icon(
+              onPressed: widget.onScan,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Add food'),
+            ),
+          ),
+        ],
+        const SizedBox(height: 6),
         SizedBox(
-          height: 50,
-          child: OutlinedButton.icon(
+          height: 46,
+          child: TextButton.icon(
             onPressed: () => openManualAdd(
               context,
               day: widget.day,
               onAdd: widget.onAdd,
               meal: defaultMealForNow(),
             ),
-            icon: const Icon(Icons.add_rounded),
+            icon: const Icon(Icons.edit_note_rounded),
             label: const Text('Add food manually'),
           ),
         ),
