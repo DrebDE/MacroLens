@@ -1,1920 +1,279 @@
-import 'dart:convert';
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-void main() => runApp(const MacroTrackApp());
-const ink = Color(0xFF1F2B21),
-    green = Color(0xFF2E7D32),
-    lime = Color(0xFFE8F5E9),
-    canvas = Color(0xFFF7FAF6),
-    muted = Color(0xFF69766B),
-    scanUrl = String.fromEnvironment('MACROS_API_URL', defaultValue: ''),
-    scannerAccessCode =
-        String.fromEnvironment('SCANNER_ACCESS_TOKEN', defaultValue: '');
-const aiName = 'Nouri';
-const catalog = <Food>[
-  Food('Cooked white rice', 130, 2.7, 28.2, .3,
-      ['rice', 'white rice', 'steamed rice']),
-  Food('Grilled chicken breast', 165, 31, 0, 3.6,
-      ['chicken', 'chicken breast', 'grilled chicken']),
-  Food('Cooked egg', 155, 13, 1.1, 11,
-      ['egg', 'eggs', 'boiled egg', 'fried egg']),
-  Food('Banana', 89, 1.1, 22.8, .3, ['banana']),
-  Food('Cooked salmon', 206, 22.1, 0, 12.4, ['salmon', 'fish']),
-  Food('Cooked oatmeal', 71, 2.5, 12, 1.5,
-      ['oatmeal', 'porridge', 'rolled oats']),
-  Food('Baked potato', 93, 2.5, 21, .1, ['potato', 'baked potato']),
-  Food('Cooked broccoli', 35, 2.4, 7.2, .4, ['broccoli']),
-  Food('Whole wheat bread', 247, 13, 41, 4.2,
-      ['bread', 'toast', 'whole wheat bread']),
-  Food('Avocado', 160, 2, 8.5, 14.7, ['avocado', 'avocado slices']),
-  Food('Greek yogurt, plain', 97, 9, 3.9, 5, ['greek yogurt', 'yogurt']),
-  Food('Tomato', 18, .9, 3.9, .2, ['tomato', 'tomatoes']),
-  Food('Lettuce', 15, 1.4, 2.9, .2, ['lettuce', 'salad greens']),
-  Food('Pork adobo', 210, 20, 4, 12, ['adobo', 'pork adobo']),
-];
-String norm(String value) =>
-    value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9 ]'), ' ').trim();
-Food? matchFood(String text) {
-  final q = norm(text);
-  for (final f in catalog) {
-    if (f.aliases
-        .any((a) => q == norm(a) || q.contains(norm(a)) || norm(a).contains(q)))
-      return f;
-  }
-  return null;
-}
+import 'models.dart';
+import 'screens/food_log_page.dart';
+import 'screens/login_page.dart';
+import 'screens/profile_page.dart';
+import 'screens/scanner_page.dart';
+import 'screens/today_page.dart';
+import 'storage.dart';
+import 'theme.dart';
+import 'ui/common.dart';
 
-Food? aiFoodFromResult(String name, Object? rawNutrition) {
-  if (rawNutrition is! Map) return null;
-  final calories = (rawNutrition['calories_kcal'] as num?)?.toDouble();
-  final protein = (rawNutrition['protein_g'] as num?)?.toDouble();
-  final carbs = (rawNutrition['carbs_g'] as num?)?.toDouble();
-  final fat = (rawNutrition['fat_g'] as num?)?.toDouble();
-  if (calories == null || protein == null || carbs == null || fat == null) {
-    return null;
-  }
-  final values = [calories, protein, carbs, fat];
-  if (values.any((value) => !value.isFinite || value < 0) ||
-      calories > 950 ||
-      protein > 100 ||
-      carbs > 100 ||
-      fat > 100 ||
-      protein + carbs + fat > 101) {
-    return null;
-  }
-  return Food(name, calories, protein, carbs, fat, [name], isAiEstimate: true);
-}
+void main() => runApp(const MacroLensApp());
 
-String? imageMimeType(XFile file) {
-  const supported = {
-    'image/jpeg',
-    'image/png',
-    'image/webp',
-    'image/heic',
-    'image/heif',
-  };
-  final fromPicker = file.mimeType?.split(';').first.trim().toLowerCase();
-  if (fromPicker != null && supported.contains(fromPicker)) return fromPicker;
-  final extension = file.name.split('.').last.toLowerCase();
-  return switch (extension) {
-    'jpg' || 'jpeg' => 'image/jpeg',
-    'png' => 'image/png',
-    'webp' => 'image/webp',
-    'heic' => 'image/heic',
-    'heif' => 'image/heif',
-    _ => null,
-  };
-}
+class MacroLensApp extends StatefulWidget {
+  const MacroLensApp({super.key});
 
-class Food {
-  const Food(this.name, this.kcal100, this.protein100, this.carbs100,
-      this.fat100, this.aliases,
-      {this.isAiEstimate = false});
-  final String name;
-  final double kcal100, protein100, carbs100, fat100;
-  final List<String> aliases;
-  final bool isAiEstimate;
-}
-
-class MealEntry {
-  MealEntry(
-      {required this.food,
-      required this.grams,
-      required this.category,
-      DateTime? date})
-      : date = date ?? DateTime.now();
-  final Food food;
-  final double grams;
-  final String category;
-  final DateTime date;
-  double get kcal => food.kcal100 * grams / 100;
-  double get protein => food.protein100 * grams / 100;
-  double get carbs => food.carbs100 * grams / 100;
-  double get fat => food.fat100 * grams / 100;
-}
-
-class HealthProfile {
-  String name = '';
-  String formulaSetting = 'Average';
-  String goal = 'Maintain weight';
-  int age = 0;
-  double height = 0, weight = 0, activity = 1.2;
-  double? goalWeight;
-
-  bool get isComplete =>
-      name.trim().isNotEmpty &&
-      age >= 13 &&
-      age <= 110 &&
-      height >= 100 &&
-      height <= 250 &&
-      weight >= 30 &&
-      weight <= 350 &&
-      const ['Lose weight', 'Maintain weight', 'Gain weight'].contains(goal) &&
-      const ['Female', 'Male', 'Average'].contains(formulaSetting) &&
-      const [1.2, 1.375, 1.55, 1.725].contains(activity);
-  bool get canEstimateCalories => isComplete && age >= 18;
-  double get maintenanceCalories => bmr * activity;
-  double get bmr =>
-      10 * weight +
-      6.25 * height -
-      5 * age +
-      switch (formulaSetting) {
-        'Female' => -161,
-        'Male' => 5,
-        _ => -78,
-      };
-  double get goalAdjustment => switch (goal) {
-        'Lose weight' => -250,
-        'Gain weight' => 200,
-        _ => 0,
-      };
-  double get calories => canEstimateCalories
-      ? (maintenanceCalories + goalAdjustment).clamp(0, 10000).roundToDouble()
-      : 0;
-  double get proteinGoal => calories * .30 / 4;
-  double get carbsGoal => calories * .40 / 4;
-  double get fatGoal => calories * .30 / 9;
-
-  String get activityLabel => switch (activity) {
-        1.2 => 'Mostly sitting',
-        1.375 => 'Light activity',
-        1.55 => 'Moderate activity',
-        _ => 'Very active',
-      };
-
-  Map<String, Object?> toJson() => {
-        'name': name.trim(),
-        'age': age,
-        'height': height,
-        'weight': weight,
-        'formulaSetting': formulaSetting,
-        'activity': activity,
-        'goal': goal,
-        'goalWeight': goalWeight,
-      };
-
-  void restore(Map<String, dynamic> data) {
-    name = data['name'] as String? ?? '';
-    age = (data['age'] as num?)?.toInt() ?? 0;
-    height = (data['height'] as num?)?.toDouble() ?? 0;
-    weight = (data['weight'] as num?)?.toDouble() ?? 0;
-    final savedFormula = data['formulaSetting'] as String?;
-    formulaSetting = const ['Female', 'Male', 'Average'].contains(savedFormula)
-        ? savedFormula!
-        : 'Average';
-    final savedActivity = (data['activity'] as num?)?.toDouble();
-    activity = const [1.2, 1.375, 1.55, 1.725].contains(savedActivity)
-        ? savedActivity!
-        : 1.2;
-    final savedGoal = data['goal'] as String?;
-    goal = const ['Lose weight', 'Maintain weight', 'Gain weight']
-            .contains(savedGoal)
-        ? savedGoal!
-        : 'Maintain weight';
-    goalWeight = (data['goalWeight'] as num?)?.toDouble();
-  }
-}
-
-class MacroTrackApp extends StatefulWidget {
-  const MacroTrackApp({super.key});
   @override
-  State<MacroTrackApp> createState() => _MacroTrackAppState();
+  State<MacroLensApp> createState() => _MacroLensAppState();
 }
 
-class _MacroTrackAppState extends State<MacroTrackApp> {
+class _MacroLensAppState extends State<MacroLensApp> {
+  final store = LocalStore();
+  final messengerKey = GlobalKey<ScaffoldMessengerState>();
+  final entries = <MealEntry>[];
+  HealthProfile profile = HealthProfile();
   bool signedIn = false;
   bool sessionLoaded = false;
   bool profileConfigured = false;
+  bool storageWarningShown = false;
   int tab = 0;
-  static const _demoSessionKey = 'macrolens.demo.signed_in';
-  static const _profileKey = 'macrolens.profile.v1';
-  final profile = HealthProfile();
-  final entries = <MealEntry>[];
-  DateTime selectedDay = DateTime.now();
+  DateTime selectedDay = dateOnly(DateTime.now());
+  late final ThemeData appTheme = buildAppTheme();
 
   @override
   void initState() {
     super.initState();
-    _loadDemoSession();
+    _load();
   }
 
-  Future<void> _loadDemoSession() async {
-    var restoredSession = false;
-    try {
-      final preferences = await SharedPreferences.getInstance();
-      restoredSession = preferences.getBool(_demoSessionKey) ?? false;
-      final savedProfile = preferences.getString(_profileKey);
-      if (savedProfile != null) {
-        final decoded = jsonDecode(savedProfile);
-        if (decoded is Map<String, dynamic>) profile.restore(decoded);
-      }
-    } catch (_) {
-      // If local storage is unavailable, use the profile setup flow again.
-    }
+  Future<void> _load() async {
+    final data = await store.load();
     if (!mounted) return;
     setState(() {
-      signedIn = restoredSession;
+      signedIn = data.signedIn;
+      profile = data.profile;
       profileConfigured = profile.isComplete;
+      entries
+        ..clear()
+        ..addAll(data.entries);
       sessionLoaded = true;
     });
   }
 
   Future<void> _continueDemo(String? displayName) async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setBool(_demoSessionKey, true);
-    if (!profileConfigured && (displayName ?? '').trim().isNotEmpty) {
-      profile.name = displayName!.trim();
+    await store.saveSignedIn(true);
+    final trimmed = (displayName ?? '').trim();
+    if (!profileConfigured && trimmed.isNotEmpty) {
+      profile.name = trimmed;
     }
     if (!mounted) return;
     setState(() => signedIn = true);
   }
 
   Future<void> _saveProfile() async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_profileKey, jsonEncode(profile.toJson()));
+    await store.saveProfile(profile);
     if (!mounted) return;
     setState(() => profileConfigured = profile.isComplete);
   }
 
   Future<void> _signOut() async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.remove(_demoSessionKey);
+    try {
+      await store.saveSignedIn(false);
+    } catch (_) {
+      // Still end the in-app session even if the device flag cannot be saved.
+    }
     if (!mounted) return;
     setState(() {
       signedIn = false;
       tab = 0;
+      selectedDay = dateOnly(DateTime.now());
     });
   }
 
-  List<MealEntry> get todays => entries
-      .where((e) =>
-          e.date.year == selectedDay.year &&
-          e.date.month == selectedDay.month &&
-          e.date.day == selectedDay.day)
-      .toList();
-  double get kcal => todays.fold(0, (s, e) => s + e.kcal);
-  double get protein => todays.fold(0, (s, e) => s + e.protein);
-  double get carbs => todays.fold(0, (s, e) => s + e.carbs);
-  double get fat => todays.fold(0, (s, e) => s + e.fat);
-  void add(MealEntry e) => setState(() => entries.insert(0, e));
-  void remove(MealEntry e) => setState(() => entries.remove(e));
-  void changeDay(DateTime d) => setState(() => selectedDay = d);
+  void _addEntry(MealEntry entry) {
+    setState(() {
+      entries.insert(0, entry);
+      selectedDay = dateOnly(entry.date);
+      tab = 0;
+    });
+    _persistLog();
+    _showSnack(
+      'Added ${entry.food.name}',
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () => _undoEntry(entry),
+      ),
+    );
+  }
+
+  void _removeEntry(MealEntry entry) {
+    final index = entries.indexOf(entry);
+    if (index == -1) return;
+    setState(() => entries.removeAt(index));
+    _persistLog();
+    _showSnack(
+      'Removed ${entry.food.name}',
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () => _restoreEntry(entry, index),
+      ),
+    );
+  }
+
+  void _undoEntry(MealEntry entry) {
+    if (entries.contains(entry)) {
+      setState(() => entries.remove(entry));
+      _persistLog();
+    }
+  }
+
+  void _restoreEntry(MealEntry entry, int index) {
+    if (entries.contains(entry)) return;
+    setState(() {
+      entries.insert(index > entries.length ? entries.length : index, entry);
+    });
+    _persistLog();
+  }
+
+  Future<void> _persistLog() async {
+    try {
+      await store.saveLog(entries);
+      storageWarningShown = false;
+    } catch (_) {
+      if (mounted && !storageWarningShown) {
+        storageWarningShown = true;
+        _showSnack(
+          'Meal saved for this session, but this device’s storage could not be updated.',
+        );
+      }
+    }
+  }
+
+  Future<void> _clearHistory() async {
+    try {
+      await store.clearLog();
+    } catch (_) {
+      if (!mounted) return;
+      _showSnack('Could not clear meal history. Please try again.');
+      return;
+    }
+    if (!mounted) return;
+    setState(() => entries.clear());
+    _showSnack('Meal history cleared');
+  }
+
+  void _showSnack(String message, {SnackBarAction? action}) {
+    final messenger = messengerKey.currentState;
+    if (messenger == null) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message), action: action));
+  }
+
   @override
   Widget build(BuildContext context) => MaterialApp(
-      title: 'MacroLens',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-          useMaterial3: true,
-          scaffoldBackgroundColor: canvas,
-          colorScheme: ColorScheme.fromSeed(
-              seedColor: green, primary: green, surface: canvas),
-          inputDecorationTheme: InputDecorationTheme(
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Color(0xFFDDE6DC))),
-            enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: Color(0xFFDDE6DC))),
-            focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: green, width: 1.5)),
-          ),
-          fontFamily: 'Roboto'),
-      home: !sessionLoaded
-          ? const Scaffold(
-              body: Center(child: CircularProgressIndicator(color: green)))
-          : signedIn
-              ? !profileConfigured
-                  ? ProfileEditorPage(
-                      profile: profile, isSetup: true, onSave: _saveProfile)
-                  : Scaffold(
-                      body: SafeArea(
-                          child: IndexedStack(index: tab, children: [
-                        Dashboard(
-                            day: selectedDay,
-                            entries: todays,
-                            allEntries: entries,
-                            kcal: kcal,
-                            protein: protein,
-                            carbs: carbs,
-                            fat: fat,
-                            profile: profile,
-                            onScan: () => setState(() => tab = 1),
-                            onDate: changeDay,
-                            onAdd: add,
-                            onRemove: remove,
-                            onShowLog: () => setState(() => tab = 2)),
-                        ScannerPage(onAdd: (e) {
-                          add(e);
-                          changeDay(e.date);
-                          setState(() => tab = 0);
-                        }),
-                        FoodLogPage(
-                            day: selectedDay,
-                            entries: todays,
-                            onDate: changeDay,
-                            onAdd: add,
-                            onRemove: remove),
-                        ProfilePage(
-                            profile: profile,
-                            onSaved: _saveProfile,
-                            onSignOut: _signOut)
-                      ])),
-                      bottomNavigationBar: NavigationBar(
+        title: 'MacroLens',
+        debugShowCheckedModeBanner: false,
+        scaffoldMessengerKey: messengerKey,
+        theme: appTheme,
+        home: !sessionLoaded
+            ? const _LoadingScreen()
+            : signedIn
+                ? !profileConfigured
+                    ? ProfileEditorPage(
+                        profile: profile,
+                        isSetup: true,
+                        onSave: _saveProfile,
+                      )
+                    : Scaffold(
+                        body: SafeArea(
+                          bottom: false,
+                          child: IndexedStack(
+                            index: tab,
+                            children: [
+                              TodayPage(
+                                day: selectedDay,
+                                entries: entries,
+                                profile: profile,
+                                onDay: (day) =>
+                                    setState(() => selectedDay = dateOnly(day)),
+                                onAdd: _addEntry,
+                                onRemove: _removeEntry,
+                                onScan: () => setState(() => tab = 1),
+                                onShowLog: () => setState(() => tab = 2),
+                              ),
+                              ScannerPage(onAdd: _addEntry),
+                              FoodLogPage(
+                                day: selectedDay,
+                                entries: entries,
+                                profile: profile,
+                                onDay: (day) =>
+                                    setState(() => selectedDay = dateOnly(day)),
+                                onAdd: _addEntry,
+                                onRemove: _removeEntry,
+                              ),
+                              ProfilePage(
+                                profile: profile,
+                                onSaved: _saveProfile,
+                                onSignOut: _signOut,
+                                onClearHistory: _clearHistory,
+                                hasHistory: entries.isNotEmpty,
+                              ),
+                            ],
+                          ),
+                        ),
+                        bottomNavigationBar: NavigationBar(
                           selectedIndex: tab,
-                          onDestinationSelected: (i) => setState(() => tab = i),
-                          backgroundColor: Colors.white,
-                          indicatorColor: lime,
+                          onDestinationSelected: (index) =>
+                              setState(() => tab = index),
                           destinations: const [
                             NavigationDestination(
-                                icon: Icon(Icons.home_outlined),
-                                selectedIcon: Icon(Icons.home_rounded),
-                                label: 'Today'),
+                              icon: Icon(Icons.home_outlined),
+                              selectedIcon: Icon(Icons.home_rounded),
+                              label: 'Today',
+                            ),
                             NavigationDestination(
-                                icon: Icon(Icons.document_scanner_outlined),
-                                selectedIcon:
-                                    Icon(Icons.document_scanner_rounded),
-                                label: 'Scanner'),
+                              icon: Icon(Icons.document_scanner_outlined),
+                              selectedIcon:
+                                  Icon(Icons.document_scanner_rounded),
+                              label: 'Scanner',
+                            ),
                             NavigationDestination(
-                                icon: Icon(Icons.restaurant_menu_outlined),
-                                selectedIcon: Icon(Icons.restaurant_menu),
-                                label: 'Food log'),
+                              icon: Icon(Icons.restaurant_menu_outlined),
+                              selectedIcon: Icon(Icons.restaurant_menu_rounded),
+                              label: 'Food log',
+                            ),
                             NavigationDestination(
-                                icon: Icon(Icons.person_outline_rounded),
-                                selectedIcon: Icon(Icons.person_rounded),
-                                label: 'Profile')
-                          ]))
-              : LoginPage(onContinue: _continueDemo));
-}
-
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key, required this.onContinue});
-  final Future<void> Function(String? displayName) onContinue;
-
-  @override
-  State<LoginPage> createState() => _LoginPageState();
-}
-
-class _LoginPageState extends State<LoginPage> {
-  final formKey = GlobalKey<FormState>();
-  final name = TextEditingController();
-  final email = TextEditingController();
-  final password = TextEditingController();
-  bool accepted = false;
-  bool register = false;
-  bool showPassword = false;
-  bool submitting = false;
-
-  @override
-  void dispose() {
-    name.dispose();
-    email.dispose();
-    password.dispose();
-    super.dispose();
-  }
-
-  Future<void> enterDemo() async {
-    if (!accepted || !(formKey.currentState?.validate() ?? false)) return;
-    password.clear();
-    setState(() => submitting = true);
-    try {
-      await widget.onContinue(register ? name.text.trim() : null);
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Could not save this device’s sign-in. Try again.')));
-        setState(() => submitting = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        body: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(26, 28, 26, 24),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
-                child: Form(
-                  key: formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 68,
-                          height: 68,
-                          decoration: BoxDecoration(
-                              color: green,
-                              borderRadius: BorderRadius.circular(22)),
-                          child: const Icon(Icons.center_focus_strong_rounded,
-                              color: Colors.white, size: 36),
+                              icon: Icon(Icons.person_outline_rounded),
+                              selectedIcon: Icon(Icons.person_rounded),
+                              label: 'Profile',
+                            ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text('MacroLens',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                              color: ink,
-                              fontSize: 27,
-                              fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 7),
-                      Text(register ? 'Create your account' : 'Welcome back',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              color: ink,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 5),
-                      Text(
-                          register
-                              ? 'Start building a clearer picture of your nutrition.'
-                              : 'Sign in to continue tracking your nutrition.',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: muted, fontSize: 13)),
-                      const SizedBox(height: 25),
-                      if (register) ...[
-                        TextFormField(
-                          controller: name,
-                          textCapitalization: TextCapitalization.words,
-                          decoration: const InputDecoration(
-                              labelText: 'Your name',
-                              prefixIcon: Icon(Icons.person_outline)),
-                          validator: (v) => (v ?? '').trim().isEmpty
-                              ? 'Enter your name.'
-                              : null,
-                        ),
-                        const SizedBox(height: 13),
-                      ],
-                      TextFormField(
-                        controller: email,
-                        keyboardType: TextInputType.emailAddress,
-                        autofillHints: const [AutofillHints.email],
-                        decoration: const InputDecoration(
-                            labelText: 'Email address',
-                            prefixIcon: Icon(Icons.mail_outline_rounded)),
-                        validator: (v) => (v ?? '').contains('@')
-                            ? null
-                            : 'Enter a valid email address.',
-                      ),
-                      const SizedBox(height: 13),
-                      TextFormField(
-                        controller: password,
-                        obscureText: !showPassword,
-                        autofillHints: const [AutofillHints.password],
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          prefixIcon: const Icon(Icons.lock_outline_rounded),
-                          suffixIcon: IconButton(
-                            tooltip: showPassword
-                                ? 'Hide password'
-                                : 'Show password',
-                            onPressed: () =>
-                                setState(() => showPassword = !showPassword),
-                            icon: Icon(showPassword
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined),
-                          ),
-                        ),
-                        validator: (v) => (v ?? '').length >= 6
-                            ? null
-                            : 'Use at least 6 characters.',
-                      ),
-                      const SizedBox(height: 12),
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        value: accepted,
-                        onChanged: (v) => setState(() => accepted = v ?? false),
-                        title: Wrap(children: [
-                          const Text('I agree to the ',
-                              style: TextStyle(fontSize: 12, color: muted)),
-                          _LegalLink(
-                              label: 'Terms',
-                              onTap: () => showLegal(context, LegalKind.terms)),
-                          const Text(' and ',
-                              style: TextStyle(fontSize: 12, color: muted)),
-                          _LegalLink(
-                              label: 'Privacy Policy',
-                              onTap: () =>
-                                  showLegal(context, LegalKind.privacy)),
-                        ]),
-                      ),
-                      const SizedBox(height: 7),
-                      SizedBox(
-                        height: 52,
-                        child: FilledButton(
-                          onPressed: accepted && !submitting ? enterDemo : null,
-                          style: FilledButton.styleFrom(
-                              backgroundColor: green,
-                              foregroundColor: Colors.white),
-                          child: submitting
-                              ? const SizedBox.square(
-                                  dimension: 22,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: Colors.white))
-                              : Text(
-                                  register ? 'Create demo account' : 'Sign in',
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 15)),
-                        ),
-                      ),
-                      const SizedBox(height: 13),
-                      TextButton(
-                        onPressed: () => setState(() => register = !register),
-                        child: Text(register
-                            ? 'Already have an account? Sign in'
-                            : 'New to MacroLens? Create an account'),
-                      ),
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.all(13),
-                        decoration: BoxDecoration(
-                            color: lime.withValues(alpha: .6),
-                            borderRadius: BorderRadius.circular(14)),
-                        child: const Text(
-                          'Prototype sign-in: your email and password are not sent or saved. This device remembers that you entered the demo.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: muted, fontSize: 11),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-}
-
-enum LegalKind { terms, privacy }
-
-void showLegal(BuildContext context, LegalKind kind) {
-  Navigator.of(context)
-      .push(MaterialPageRoute<void>(builder: (_) => LegalPage(kind: kind)));
-}
-
-class _LegalLink extends StatelessWidget {
-  const _LegalLink({required this.label, required this.onTap});
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: onTap,
-        child: Text(label,
-            style: const TextStyle(
-                color: green,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                decoration: TextDecoration.underline)),
-      );
-}
-
-class LegalPage extends StatelessWidget {
-  const LegalPage({super.key, required this.kind});
-  final LegalKind kind;
-
-  @override
-  Widget build(BuildContext context) {
-    final terms = kind == LegalKind.terms;
-    final sections = terms ? _termsSections : _privacySections;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(terms ? 'Terms of Service' : 'Privacy Policy'),
-        backgroundColor: canvas,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(22, 8, 22, 28),
-        children: [
-          Text(
-              terms ? 'MacroLens Terms of Service' : 'MacroLens Privacy Policy',
-              style: const TextStyle(
-                  color: ink, fontSize: 23, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 5),
-          const Text('Prototype draft · Last updated October 30, 2026',
-              style: TextStyle(color: muted, fontSize: 11)),
-          const SizedBox(height: 12),
-          Text(
-              terms
-                  ? 'These terms describe use of the MacroLens nutrition-tracking prototype. By continuing, you agree to use it for personal, informational tracking.'
-                  : 'This draft explains what the current MacroLens prototype processes. It is not a statement that a production account, cloud database, or secure authentication system is connected.',
-              style: const TextStyle(color: ink, height: 1.55)),
-          const SizedBox(height: 14),
-          ...sections.map((section) => Padding(
-                padding: const EdgeInsets.only(bottom: 15),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(section.$1,
-                          style: const TextStyle(
-                              color: ink,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 5),
-                      Text(section.$2,
-                          style: const TextStyle(
-                              color: muted, height: 1.5, fontSize: 13)),
-                    ]),
-              )),
-          if (!terms)
-            const SelectableText(
-              'Google Gemini API terms: https://ai.google.dev/gemini-api/terms',
-              style: TextStyle(color: green, fontSize: 12),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-const _termsSections = <(String, String)>[
-  (
-    'Prototype access',
-    'MacroLens currently provides a local demonstration. Sign-in and account creation on the welcome screen are visual prototype flows only. Credentials are not verified, transmitted, or stored, and no account is created.'
-  ),
-  (
-    'Nutrition information',
-    'Food recognition, visual portion estimates, calorie totals, and macro values are approximate and may be incomplete or wrong. For foods outside the sample catalog, Nouri estimates generic nutrition values. Confirm the food and edit the estimated amount before logging; a photo is not a scale measurement.'
-  ),
-  (
-    'Not medical advice',
-    'MacroLens is for general informational tracking only. It does not diagnose, treat, or prevent any condition and is not a substitute for medical or dietetic advice. Consult a qualified professional for personal health decisions.'
-  ),
-  (
-    'Acceptable use',
-    'Use only photos you have permission to use. Do not use the prototype for emergencies, clinical decisions, or to process information about another person without their permission.'
-  ),
-  (
-    'Availability and changes',
-    'This prototype is provided for testing and may be changed or unavailable at any time. Profile information is saved locally on the device; meal logs are currently held in memory and can be lost when the app closes.'
-  ),
-  (
-    'Contact',
-    'This prototype has no connected support or account service. Before public release, replace this draft with the operator’s legal name, contact address, effective date, and locally reviewed terms.'
-  ),
-];
-
-const _privacySections = <(String, String)>[
-  (
-    'Prototype and account data',
-    'The app has no authentication backend or cloud database. Login fields are used only for local form validation; the entered email and password are not sent or saved. A simple sign-in flag and profile details (name, age, height, weight, selected goal, activity and formula setting) are saved in local app preferences on this device and are not uploaded to the MacroLens scanner. Meal entries remain in app memory and may be lost when the app closes. Clearing app data or uninstalling removes locally saved profile details.'
-  ),
-  (
-    'Food photos and AI scanning',
-    'When you tap Scan with Nouri, the selected photo is sent from your phone over HTTPS to the hosted MacroLens scanner. Nouri is instructed to process edible food only and reject non-food or unclear images. The scanner forwards the image to Google Gemini API and returns a food match, a visual portion estimate and range, and approximate nutrition values per 100 grams. This guardrail can still make mistakes. Scan one food or mixed dish at a time; do not scan people, documents, materials, or sensitive images.'
-  ),
-  (
-    'Google Gemini and free use',
-    'If the backend uses an unpaid Gemini API quota, Google’s terms say submitted prompts, images, and responses may be used to improve Google services and may be reviewed by people. Do not submit sensitive, confidential, or personal information to unpaid Gemini services. Google handles that processing under its own terms and privacy policy.'
-  ),
-  (
-    'Nutrition calculations',
-    'For catalog foods, the app calculates nutrition locally from catalog values. For unmatched foods, Gemini provides approximate generic values per 100 grams and the app scales them to your confirmed portion. The visual gram range is a guide, not a measurement; adjust the amount to what you ate. Meal logs are not sent to the Gemini model. AI and catalog estimates are informational and can be inaccurate.'
-  ),
-  (
-    'Retention and deletion',
-    'The prototype does not intentionally store scanner photos or meal logs on a server, but Google’s handling of a submitted image depends on the Gemini service tier and its terms. Closing or reinstalling the app can clear in-memory entries. Uninstalling the app also removes the locally stored demo sign-in flag. No account deletion feature exists because accounts are not connected.'
-  ),
-  (
-    'Network and security',
-    'Online scanner traffic uses HTTPS and a separate scanner access code. The Gemini API key stays on the scanner service and must not be placed in the phone app. This prototype is not a production authentication system and has not had a security review.'
-  ),
-  (
-    'Contact and changes',
-    'No privacy contact channel is connected in this prototype. Before public release, identify the responsible operator, contact details, applicable jurisdiction, retention rules, and an effective date, and have this notice reviewed for the intended markets.'
-  ),
-];
-
-class Dashboard extends StatelessWidget {
-  const Dashboard(
-      {super.key,
-      required this.day,
-      required this.entries,
-      required this.allEntries,
-      required this.kcal,
-      required this.protein,
-      required this.carbs,
-      required this.fat,
-      required this.profile,
-      required this.onScan,
-      required this.onDate,
-      required this.onAdd,
-      required this.onRemove,
-      required this.onShowLog});
-  final DateTime day;
-  final List<MealEntry> entries, allEntries;
-  final double kcal, protein, carbs, fat;
-  final HealthProfile profile;
-  final VoidCallback onScan, onShowLog;
-  final ValueChanged<DateTime> onDate;
-  final ValueChanged<MealEntry> onAdd, onRemove;
-  @override
-  Widget build(BuildContext context) {
-    final meals = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
-    final hour = DateTime.now().hour;
-    final greeting = hour < 12
-        ? 'Good morning'
-        : hour < 17
-            ? 'Good afternoon'
-            : 'Good evening';
-    return ListView(
-        padding: const EdgeInsets.fromLTRB(20, 15, 20, 22),
-        children: [
-          Row(children: [
-            Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                    color: ink, borderRadius: BorderRadius.circular(13)),
-                child: const Icon(Icons.center_focus_strong_rounded,
-                    color: Colors.white)),
-            const SizedBox(width: 9),
-            const Text('MacroLens',
-                style: TextStyle(
-                    color: ink, fontSize: 19, fontWeight: FontWeight.w800)),
-            const Spacer(),
-            IconButton(
-                onPressed: () => pickDate(context, day, onDate),
-                icon: const Icon(Icons.calendar_month_outlined, color: ink))
-          ]),
-          const SizedBox(height: 17),
-          Text(
-              day.year == DateTime.now().year &&
-                      day.month == DateTime.now().month &&
-                      day.day == DateTime.now().day
-                  ? 'TODAY'
-                  : '${day.month}/${day.day}/${day.year}',
-              style: const TextStyle(
-                  color: muted,
-                  fontSize: 10,
-                  letterSpacing: 1.2,
-                  fontWeight: FontWeight.w700)),
-          const SizedBox(height: 3),
-          Text('$greeting, ${profile.name}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  color: ink, fontSize: 24, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 3),
-          const Text('Let’s log what you eat.',
-              style: TextStyle(color: muted, fontSize: 12)),
-          const SizedBox(height: 14),
-          Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: const Color(0xFFE1EADF))),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      Expanded(
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Calories today',
-                                  style: TextStyle(
-                                      color: muted,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600)),
-                              const SizedBox(height: 2),
-                              Row(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(kcal.toStringAsFixed(0),
-                                        style: const TextStyle(
-                                            color: ink,
-                                            fontSize: 32,
-                                            fontWeight: FontWeight.w800)),
-                                    const Padding(
-                                        padding:
-                                            EdgeInsets.only(left: 5, bottom: 6),
-                                        child: Text('kcal eaten',
-                                            style: TextStyle(
-                                                color: muted, fontSize: 11)))
-                                  ]),
-                              Text(
-                                  profile.canEstimateCalories
-                                      ? 'of ${profile.calories.toStringAsFixed(0)} kcal goal'
-                                      : 'Daily target unavailable for this age',
-                                  style: const TextStyle(
-                                      color: muted, fontSize: 11))
-                            ]),
-                      ),
-                      const SizedBox(width: 12),
-                      SizedBox.square(
-                        dimension: 66,
-                        child: Stack(alignment: Alignment.center, children: [
-                          CircularProgressIndicator(
-                            value: profile.calories == 0
-                                ? 0
-                                : (kcal / profile.calories).clamp(0.0, 1.0),
-                            strokeWidth: 7,
-                            backgroundColor: const Color(0xFFE8F5E9),
-                            color: green,
-                            strokeCap: StrokeCap.round,
-                          ),
-                          Text(
-                              '${profile.calories == 0 ? 0 : (kcal / profile.calories * 100).round()}%',
-                              style: const TextStyle(
-                                  color: ink,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w800))
-                        ]),
                       )
-                    ]),
-                    const SizedBox(height: 15),
-                    if (profile.canEstimateCalories)
-                      Row(children: [
-                        _Macro('Protein', protein, profile.proteinGoal, 'g',
-                            const Color(0xFF1B5E20)),
-                        _Macro('Carbs', carbs, profile.carbsGoal, 'g',
-                            const Color(0xFF2E7D32)),
-                        _Macro('Fat', fat, profile.fatGoal, 'g',
-                            const Color(0xFF00695C))
-                      ])
-                  ])),
-          const SizedBox(height: 18),
-          Row(children: [
-            const Expanded(
-                child: Text('This week',
-                    style: TextStyle(
-                        color: ink,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800))),
-            TextButton(onPressed: onShowLog, child: const Text('History'))
-          ]),
-          _WeekChart(entries: allEntries, goal: profile.calories),
-          const SizedBox(height: 16),
-          Row(children: [
-            const Expanded(
-                child: Text('Meals',
-                    style: TextStyle(
-                        color: ink,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800))),
-            TextButton(
-                onPressed: () => manualAdd(context, onAdd),
-                child: const Text('+ Add food'))
-          ]),
-          ...meals.map((m) {
-            final group = entries.where((e) => e.category == m).toList();
-            final groupKcal = group.fold(0.0, (s, e) => s + e.kcal);
-            return _MealGroup(
-                name: m, items: group, kcal: groupKcal, onRemove: onRemove);
-          }),
-          const SizedBox(height: 9),
-          SizedBox(
-              height: 52,
-              child: FilledButton.icon(
-                  onPressed: onScan,
-                  style: FilledButton.styleFrom(
-                      backgroundColor: green, foregroundColor: Colors.white),
-                  icon: const Icon(Icons.camera_alt_outlined),
-                  label: const Text('Scan food',
-                      style: TextStyle(fontWeight: FontWeight.w800))))
-        ]);
-  }
+                : LoginPage(onContinue: _continueDemo),
+      );
 }
 
-class _Bar extends StatelessWidget {
-  const _Bar({required this.value, required this.goal, required this.color});
-  final double value, goal;
-  final Color color;
-  @override
-  Widget build(BuildContext context) => ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: LinearProgressIndicator(
-          value: goal == 0 ? 0 : (value / goal).clamp(0, 1),
-          minHeight: 7,
-          backgroundColor: const Color(0xFFDDE6DC),
-          color: color));
-}
-
-class _Macro extends StatelessWidget {
-  const _Macro(this.name, this.value, this.goal, this.unit, this.color);
-  final String name, unit;
-  final double value, goal;
-  final Color color;
-  @override
-  Widget build(BuildContext context) => Expanded(
-      child: Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(name, style: const TextStyle(color: muted, fontSize: 10)),
-            const SizedBox(height: 3),
-            Text(
-                '${value.toStringAsFixed(0)} / ${goal.toStringAsFixed(0)}$unit',
-                style: const TextStyle(
-                    color: ink, fontSize: 13, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 6),
-            _Bar(value: value, goal: goal, color: color)
-          ])));
-}
-
-class _MealGroup extends StatelessWidget {
-  const _MealGroup(
-      {required this.name,
-      required this.items,
-      required this.kcal,
-      required this.onRemove});
-  final String name;
-  final List<MealEntry> items;
-  final double kcal;
-  final ValueChanged<MealEntry> onRemove;
-  @override
-  Widget build(BuildContext context) => Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Container(
-          padding: const EdgeInsets.fromLTRB(13, 10, 9, 7),
-          decoration: BoxDecoration(
-              color: Colors.white, borderRadius: BorderRadius.circular(16)),
-          child: Column(children: [
-            Row(children: [
-              Expanded(
-                  child: Text(name,
-                      style: const TextStyle(
-                          color: ink, fontWeight: FontWeight.w800))),
-              Text('${kcal.toStringAsFixed(0)} kcal',
-                  style: const TextStyle(color: muted, fontSize: 11))
-            ]),
-            if (items.isEmpty)
-              const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Padding(
-                      padding: EdgeInsets.symmetric(vertical: 7),
-                      child: Text('No food logged',
-                          style: TextStyle(color: muted, fontSize: 11))))
-            else
-              ...items
-                  .map((e) => _FoodRow(entry: e, onRemove: () => onRemove(e)))
-          ])));
-}
-
-class _FoodRow extends StatelessWidget {
-  const _FoodRow({required this.entry, this.onRemove});
-  final MealEntry entry;
-  final VoidCallback? onRemove;
-  @override
-  Widget build(BuildContext context) => ListTile(
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-      title: Text(entry.food.name,
-          style: const TextStyle(
-              color: ink, fontSize: 13, fontWeight: FontWeight.w600)),
-      subtitle: Text(
-          '${entry.grams.toStringAsFixed(0)} g · P ${entry.protein.toStringAsFixed(1)} / C ${entry.carbs.toStringAsFixed(1)} / F ${entry.fat.toStringAsFixed(1)} g',
-          style: const TextStyle(color: muted, fontSize: 10)),
-      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-        Text('${entry.kcal.toStringAsFixed(0)}',
-            style: const TextStyle(
-                color: ink, fontSize: 12, fontWeight: FontWeight.w700)),
-        if (onRemove != null)
-          IconButton(
-              visualDensity: VisualDensity.compact,
-              onPressed: onRemove,
-              icon: const Icon(Icons.close, size: 17, color: muted))
-      ]));
-}
-
-class _WeekChart extends StatelessWidget {
-  const _WeekChart({required this.entries, required this.goal});
-  final List<MealEntry> entries;
-  final double goal;
+class _LoadingScreen extends StatelessWidget {
+  const _LoadingScreen();
 
   @override
-  Widget build(BuildContext context) {
-    final today = DateTime.now();
-    final days = List.generate(
-        7, (i) => DateTime(today.year, today.month, today.day - 6 + i));
-    final totals = days
-        .map((day) => entries
-            .where((e) =>
-                e.date.year == day.year &&
-                e.date.month == day.month &&
-                e.date.day == day.day)
-            .fold(0.0, (sum, e) => sum + e.kcal))
-        .toList();
-    return Container(
-      height: 110,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-      decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(16)),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: List.generate(7, (i) {
-          final height =
-              goal == 0 ? 0.0 : (totals[i] / goal).clamp(0.0, 1.0) * 58;
-          return Column(
-            mainAxisAlignment: MainAxisAlignment.end,
+  Widget build(BuildContext context) => const Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                  width: 21,
-                  height: height < 3 ? 3 : height,
-                  decoration: BoxDecoration(
-                      color: i == 6 ? green : const Color(0xFFDCEBDD),
-                      borderRadius: BorderRadius.circular(6))),
-              const SizedBox(height: 5),
+              Icon(
+                Icons.center_focus_strong_rounded,
+                color: AppColors.green,
+                size: 44,
+              ),
+              SizedBox(height: 12),
               Text(
-                  const [
-                    'M',
-                    'T',
-                    'W',
-                    'T',
-                    'F',
-                    'S',
-                    'S'
-                  ][days[i].weekday - 1],
-                  style: const TextStyle(fontSize: 9, color: muted)),
-            ],
-          );
-        }),
-      ),
-    );
-  }
-}
-
-class ScannerPage extends StatefulWidget {
-  const ScannerPage({super.key, required this.onAdd});
-  final ValueChanged<MealEntry> onAdd;
-  @override
-  State<ScannerPage> createState() => _ScannerPageState();
-}
-
-class _ScannerPageState extends State<ScannerPage> {
-  final picker = ImagePicker();
-  final grams = TextEditingController(text: '150');
-  XFile? photo;
-  bool busy = false;
-  String? error, detected;
-  double confidence = 0;
-  double? portionLowGrams, portionHighGrams;
-  Food? selectedFood, aiEstimate;
-  String meal = 'Lunch', unit = 'g';
-  @override
-  void dispose() {
-    grams.dispose();
-    super.dispose();
-  }
-
-  Future<void> pick(ImageSource source) async {
-    try {
-      final file = await picker.pickImage(
-          source: source, imageQuality: 84, maxWidth: 1600);
-      if (file != null) {
-        setState(() {
-          photo = file;
-          error = null;
-          detected = null;
-          selectedFood = null;
-          aiEstimate = null;
-          portionLowGrams = null;
-          portionHighGrams = null;
-        });
-      }
-    } catch (e) {
-      setState(() => error = 'Could not open image source: $e');
-    }
-  }
-
-  Future<void> analyze() async {
-    if (photo == null) return;
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      final endpoint = Uri.tryParse(scanUrl.trim());
-      if (endpoint == null || !endpoint.hasScheme || endpoint.host.isEmpty) {
-        throw const FormatException('Enter a valid scanner service URL.');
-      }
-      final mime = imageMimeType(photo!);
-      if (mime == null) {
-        throw const FormatException(
-            'This image format is not supported. Choose a JPEG, PNG, WebP, HEIC, or HEIF photo.');
-      }
-      final req = http.MultipartRequest('POST', endpoint);
-      final accessCode = scannerAccessCode.trim();
-      if (accessCode.isNotEmpty) {
-        req.headers['x-scanner-token'] = accessCode;
-      }
-      req.files.add(http.MultipartFile.fromBytes(
-          'image', await photo!.readAsBytes(),
-          filename: photo!.name, contentType: MediaType.parse(mime)));
-      final response = await req
-          .send()
-          .then(http.Response.fromStream)
-          .timeout(const Duration(seconds: 150));
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        String detail = 'Scanner service returned ${response.statusCode}.';
-        try {
-          final errorBody = jsonDecode(response.body) as Map<String, dynamic>;
-          detail = (errorBody['detail'] as String?) ?? detail;
-        } catch (_) {}
-        if (detail.contains('Gemini analysis failed: APITimeoutError')) {
-          detail =
-              '$aiName took too long to analyze this photo. Please try again in a moment, or add the food manually.';
-        }
-        throw Exception(detail);
-      }
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
-      final items = body['items'] as List? ?? const [];
-      if (body['food_detected'] != true || items.isEmpty) {
-        throw Exception(
-            'Nouri scans food only. Try a clear photo showing edible food.');
-      }
-      final first = items.first as Map<String, dynamic>;
-      final label = first['food_name'] as String;
-      final found = matchFood(label);
-      final estimate = aiFoodFromResult(label, first['nutrition_per_100g']);
-      final suggestedGrams = (first['portion_guess_g'] as num?)?.toDouble();
-      final lowGrams = (first['portion_low_g'] as num?)?.toDouble();
-      final highGrams = (first['portion_high_g'] as num?)?.toDouble();
-      setState(() {
-        detected = label;
-        confidence = ((first['confidence'] as num?)?.toDouble() ?? .65)
-            .clamp(0.0, .95)
-            .toDouble();
-        aiEstimate = estimate;
-        selectedFood = found ?? estimate;
-        portionLowGrams = lowGrams;
-        portionHighGrams = highGrams;
-        if (suggestedGrams != null &&
-            suggestedGrams.isFinite &&
-            suggestedGrams > 0 &&
-            suggestedGrams <= 5000) {
-          grams.text = suggestedGrams.round().toString();
-        }
-      });
-    } on TimeoutException {
-      setState(() => error =
-          '$aiName took too long to analyze this photo. Please try again in a moment, or add the food manually.');
-    } on http.ClientException {
-      setState(() => error =
-          'Cannot reach the scanner service. Check your internet connection and try again.');
-    } catch (e) {
-      setState(() => error = e.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  String formatPortion(double gramsValue) {
-    final amount = unit == 'oz' ? gramsValue / 28.3495 : gramsValue;
-    return '${amount.round()} ${unit == 'oz' ? 'oz' : 'g'}';
-  }
-
-  void addFood() {
-    final amount = double.tryParse(grams.text.trim().replaceAll(',', '.'));
-    if (selectedFood == null) {
-      setState(() => error = 'Choose a food or AI macro estimate.');
-      return;
-    }
-    if (amount == null || amount <= 0 || amount > 5000) {
-      setState(() => error = 'Enter a valid amount from 1 to 5,000 grams.');
-      return;
-    }
-    final g = unit == 'oz' ? amount * 28.3495 : amount;
-    widget.onAdd(MealEntry(food: selectedFood!, grams: g, category: meal));
-  }
-
-  @override
-  Widget build(BuildContext context) =>
-      ListView(padding: const EdgeInsets.fromLTRB(20, 20, 20, 24), children: [
-        const Text('Log your meal',
-            style: TextStyle(
-                color: ink, fontSize: 25, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 5),
-        const Text('Scan one food or mixed dish; Nouri estimates its macros.',
-            style: TextStyle(color: muted, fontSize: 12)),
-        const SizedBox(height: 18),
-        Container(
-            height: 245,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-                color: const Color(0xFFEEF5ED),
-                borderRadius: BorderRadius.circular(23)),
-            child: photo == null
-                ? const Center(
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.camera_alt_rounded, size: 48, color: green),
-                    SizedBox(height: 10),
-                    Text('Take a photo or upload food',
-                        style:
-                            TextStyle(color: ink, fontWeight: FontWeight.w700))
-                  ]))
-                : FutureBuilder(
-                    future: photo!.readAsBytes(),
-                    builder: (context, s) => s.hasData
-                        ? Image.memory(s.data!,
-                            fit: BoxFit.cover, width: double.infinity)
-                        : const Center(
-                            child: CircularProgressIndicator(color: green)))),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(
-              child: OutlinedButton.icon(
-                  onPressed: () => pick(ImageSource.camera),
-                  icon: const Icon(Icons.camera_alt_outlined),
-                  label: const Text('Camera'))),
-          const SizedBox(width: 9),
-          Expanded(
-              child: OutlinedButton.icon(
-                  onPressed: () => pick(ImageSource.gallery),
-                  icon: const Icon(Icons.photo_library_outlined),
-                  label: const Text('Upload photo')))
-        ]),
-        const SizedBox(height: 10),
-        SizedBox(
-            height: 48,
-            child: FilledButton(
-                onPressed: photo == null || busy ? null : analyze,
-                style: FilledButton.styleFrom(
-                    backgroundColor: green, foregroundColor: Colors.white),
-                child: busy
-                    ? const SizedBox.square(
-                        dimension: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : const Text('Scan with Nouri',
-                        style: TextStyle(fontWeight: FontWeight.w800)))),
-        if (error != null)
-          Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Text(error!,
-                  style: const TextStyle(color: Colors.red, fontSize: 12))),
-        if (detected != null) ...[
-          const SizedBox(height: 16),
-          Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                  color: Colors.white, borderRadius: BorderRadius.circular(17)),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Confirm your food',
-                        style:
-                            TextStyle(color: ink, fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 6),
-                    Text(
-                        'Nouri food match: $detected (${(confidence * 100).toStringAsFixed(0)}% match confidence). Portion and macros are estimates.',
-                        style: const TextStyle(color: muted, fontSize: 11)),
-                    const SizedBox(height: 10),
-                    DropdownButtonFormField<Food>(
-                        initialValue: selectedFood,
-                        decoration: const InputDecoration(
-                            labelText: 'Food and macro source',
-                            border: OutlineInputBorder()),
-                        items: [
-                          ...catalog.map((f) => DropdownMenuItem(
-                              value: f,
-                              child: Text(f.name,
-                                  overflow: TextOverflow.ellipsis))),
-                          if (aiEstimate != null)
-                            DropdownMenuItem(
-                                value: aiEstimate,
-                                child: Text('${aiEstimate!.name} · AI estimate',
-                                    overflow: TextOverflow.ellipsis))
-                        ],
-                        onChanged: (f) => setState(() => selectedFood = f)),
-                    const SizedBox(height: 9),
-                    LayoutBuilder(builder: (context, constraints) {
-                      final unitWidth =
-                          (constraints.maxWidth * .28).clamp(88.0, 112.0);
-                      return Row(children: [
-                        Expanded(
-                          child: TextField(
-                              controller: grams,
-                              onChanged: (_) => setState(() {}),
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                      decimal: true),
-                              decoration: const InputDecoration(
-                                  labelText: 'Estimated amount',
-                                  border: OutlineInputBorder())),
-                        ),
-                        const SizedBox(width: 9),
-                        SizedBox(
-                            width: unitWidth,
-                            child: DropdownButtonFormField<String>(
-                                isExpanded: true,
-                                isDense: true,
-                                initialValue: unit,
-                                decoration: const InputDecoration(
-                                    labelText: 'Unit',
-                                    border: OutlineInputBorder(),
-                                    contentPadding: EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 16)),
-                                selectedItemBuilder: (_) => const [
-                                      Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: Text('g')),
-                                      Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: Text('oz')),
-                                    ],
-                                items: const [
-                                  DropdownMenuItem(
-                                      value: 'g', child: Text('grams')),
-                                  DropdownMenuItem(
-                                      value: 'oz', child: Text('ounces'))
-                                ],
-                                onChanged: (v) =>
-                                    setState(() => unit = v ?? 'g')))
-                      ]);
-                    }),
-                    if (portionLowGrams != null && portionHighGrams != null)
-                      Padding(
-                          padding: const EdgeInsets.only(top: 7),
-                          child: Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                  color: lime,
-                                  borderRadius: BorderRadius.circular(10)),
-                              child: Text(
-                                  'Visual portion range: ${formatPortion(portionLowGrams!)}–${formatPortion(portionHighGrams!)}. Adjust the amount to match what you ate.',
-                                  style: const TextStyle(
-                                      color: muted, fontSize: 10)))),
-                    const SizedBox(height: 9),
-                    DropdownButtonFormField<String>(
-                        initialValue: meal,
-                        decoration: const InputDecoration(
-                            labelText: 'Meal', border: OutlineInputBorder()),
-                        items: const ['Breakfast', 'Lunch', 'Dinner', 'Snacks']
-                            .map((m) =>
-                                DropdownMenuItem(value: m, child: Text(m)))
-                            .toList(),
-                        onChanged: (v) => setState(() => meal = v ?? 'Lunch')),
-                    if (selectedFood != null &&
-                        double.tryParse(grams.text) != null) ...[
-                      const SizedBox(height: 9),
-                      _NutritionPreview(
-                          food: selectedFood!,
-                          grams: (double.tryParse(grams.text) ?? 0) *
-                              (unit == 'oz' ? 28.3495 : 1))
-                    ],
-                    const SizedBox(height: 12),
-                    SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                            onPressed: addFood,
-                            style: FilledButton.styleFrom(
-                                backgroundColor: green,
-                                foregroundColor: Colors.white),
-                            child: const Text('Add to meal',
-                                style: TextStyle(fontWeight: FontWeight.w800))))
-                  ]))
-        ],
-        const SizedBox(height: 10),
-        const Text(
-            'Nouri only scans food. The match, portion, and macro values are estimates—not scale measurements. Scan one food or mixed dish at a time.',
-            style: TextStyle(color: muted, fontSize: 10))
-      ]);
-}
-
-class _NutritionPreview extends StatelessWidget {
-  const _NutritionPreview({required this.food, required this.grams});
-  final Food food;
-  final double grams;
-  @override
-  Widget build(BuildContext context) => Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-          color: lime.withValues(alpha: .55),
-          borderRadius: BorderRadius.circular(12)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(
-            food.isAiEstimate
-                ? 'Nouri estimate · approximate'
-                : 'Food catalog values',
-            style: const TextStyle(
-                color: muted, fontSize: 10, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 4),
-        Text(
-            'For ${grams.toStringAsFixed(0)} g: ${(food.kcal100 * grams / 100).round()} kcal  ·  Protein ${(food.protein100 * grams / 100).toStringAsFixed(1)} g  ·  Carbs ${(food.carbs100 * grams / 100).toStringAsFixed(1)} g  ·  Fat ${(food.fat100 * grams / 100).toStringAsFixed(1)} g',
-            style: const TextStyle(
-                color: ink, fontSize: 11, fontWeight: FontWeight.w700))
-      ]));
-}
-
-class FoodLogPage extends StatelessWidget {
-  const FoodLogPage(
-      {super.key,
-      required this.day,
-      required this.entries,
-      required this.onDate,
-      required this.onAdd,
-      required this.onRemove});
-  final DateTime day;
-  final List<MealEntry> entries;
-  final ValueChanged<DateTime> onDate;
-  final ValueChanged<MealEntry> onAdd, onRemove;
-  @override
-  Widget build(BuildContext context) =>
-      ListView(padding: const EdgeInsets.all(20), children: [
-        Row(children: [
-          const Expanded(
-              child: Text('Food history',
-                  style: TextStyle(
-                      color: ink, fontSize: 25, fontWeight: FontWeight.w800))),
-          IconButton(
-              onPressed: () => pickDate(context, day, onDate),
-              icon: const Icon(Icons.calendar_month, color: ink))
-        ]),
-        Text('${day.month}/${day.day}/${day.year}',
-            style: const TextStyle(color: muted, fontSize: 12)),
-        const SizedBox(height: 14),
-        if (entries.isEmpty)
-          const Padding(
-              padding: EdgeInsets.all(30),
-              child: Text('No food logged for this date.',
-                  textAlign: TextAlign.center, style: TextStyle(color: muted)))
-        else
-          ...entries
-              .map((e) => _FoodRow(entry: e, onRemove: () => onRemove(e))),
-        OutlinedButton.icon(
-            onPressed: () => manualAdd(context, onAdd),
-            icon: const Icon(Icons.add),
-            label: const Text('Add food manually'))
-      ]);
-}
-
-class ProfilePage extends StatelessWidget {
-  const ProfilePage(
-      {super.key,
-      required this.profile,
-      required this.onSaved,
-      required this.onSignOut});
-  final HealthProfile profile;
-  final Future<void> Function() onSaved;
-  final VoidCallback onSignOut;
-  @override
-  Widget build(BuildContext context) =>
-      ListView(padding: const EdgeInsets.all(20), children: [
-        const Text('Profile & goals',
-            style: TextStyle(
-                color: ink, fontSize: 25, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 6),
-        const Text('Your details and daily nutrition goals.',
-            style: TextStyle(color: muted, fontSize: 12)),
-        const SizedBox(height: 16),
-        Card(
-            color: Colors.white,
-            elevation: 0,
-            child: ListTile(
-                leading: const Icon(Icons.person_outline, color: green),
-                title: Text(profile.name,
-                    style: const TextStyle(
-                        color: ink, fontWeight: FontWeight.w700)),
-                subtitle: Text(
-                    '${profile.age} years · ${profile.height.toStringAsFixed(0)} cm · ${profile.weight.toStringAsFixed(1)} kg\n${profile.goal}${profile.goalWeight == null ? '' : ' · goal ${profile.goalWeight!.toStringAsFixed(1)} kg'}'),
-                isThreeLine: true,
-                trailing: const Icon(Icons.edit_outlined, color: muted),
-                onTap: () => Navigator.of(context).push<void>(MaterialPageRoute(
-                    builder: (_) => ProfileEditorPage(
-                        profile: profile, onSave: onSaved))))),
-        const SizedBox(height: 10),
-        Card(
-            color: ink,
-            child: ListTile(
-                title: Text(
-                    profile.canEstimateCalories
-                        ? 'Estimated daily calorie goal'
-                        : 'Calorie goal not estimated',
-                    style: TextStyle(color: Colors.white)),
-                subtitle: Text(
-                    profile.canEstimateCalories
-                        ? '${profile.calories.toStringAsFixed(0)} kcal · ${profile.goal} · ${profile.activityLabel}'
-                        : 'Personalized calorie targets are for adults 18 and older.',
-                    style: const TextStyle(color: lime)),
-                leading: const Icon(Icons.bolt, color: lime))),
-        if (profile.canEstimateCalories) ...[
-          const SizedBox(height: 18),
-          const Text('Daily macro targets',
-              style: TextStyle(
-                  color: ink, fontWeight: FontWeight.w800, fontSize: 16)),
-          const SizedBox(height: 8),
-          Text(
-              'Protein ${profile.proteinGoal.toStringAsFixed(0)} g · Carbohydrates ${profile.carbsGoal.toStringAsFixed(0)} g · Fat ${profile.fatGoal.toStringAsFixed(0)} g',
-              style: const TextStyle(color: muted)),
-        ],
-        const SizedBox(height: 18),
-        if (profile.canEstimateCalories) ...[
-          Text(
-              'Activity: ${profile.activityLabel} · BMR formula setting: ${profile.formulaSetting}',
-              style: const TextStyle(color: muted, fontSize: 12)),
-          const SizedBox(height: 5),
-          Text(
-              'Uses the Mifflin-St Jeor estimate with a ${profile.goalAdjustment == 0 ? '0' : profile.goalAdjustment > 0 ? '+' : ''}${profile.goalAdjustment.toStringAsFixed(0)} kcal goal adjustment. Macro split: 30% protein, 40% carbohydrates, 30% fat.',
-              style: const TextStyle(color: muted, fontSize: 11)),
-        ],
-        const SizedBox(height: 8),
-        const Text(
-            'Targets are rough estimates for adults. They are not intended for pregnancy, breastfeeding, or medical nutrition plans.',
-            style: TextStyle(color: muted, fontSize: 11)),
-        const SizedBox(height: 18),
-        const Text('About MacroLens',
-            style: TextStyle(
-                color: ink, fontWeight: FontWeight.w800, fontSize: 16)),
-        const SizedBox(height: 6),
-        Card(
-          color: Colors.white,
-          elevation: 0,
-          child: Column(children: [
-            ListTile(
-              leading: const Icon(Icons.description_outlined, color: green),
-              title: const Text('Terms of Service'),
-              trailing: const Icon(Icons.chevron_right, color: muted),
-              onTap: () => showLegal(context, LegalKind.terms),
-            ),
-            const Divider(height: 1, indent: 16, endIndent: 16),
-            ListTile(
-              leading: const Icon(Icons.privacy_tip_outlined, color: green),
-              title: const Text('Privacy Policy'),
-              trailing: const Icon(Icons.chevron_right, color: muted),
-              onTap: () => showLegal(context, LegalKind.privacy),
-            ),
-          ]),
-        ),
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-            onPressed: onSignOut,
-            icon: const Icon(Icons.logout_rounded),
-            label: const Text('Sign out of this device')),
-        const SizedBox(height: 12),
-        const Text('Profile details are stored on this device only.',
-            style: TextStyle(color: muted, fontSize: 11))
-      ]);
-}
-
-Future<void> pickDate(BuildContext context, DateTime current,
-    ValueChanged<DateTime> onSelect) async {
-  final d = await showDatePicker(
-      context: context,
-      initialDate: current,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now());
-  if (d != null) onSelect(d);
-}
-
-Future<void> manualAdd(
-    BuildContext context, ValueChanged<MealEntry> onAdd) async {
-  Food? food;
-  String meal = 'Snacks', unit = 'g';
-  final amount = TextEditingController(text: '100');
-  final result = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-          builder: (ctx, refresh) => AlertDialog(
-                  title: const Text('Add food'),
-                  content: SingleChildScrollView(
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    DropdownButtonFormField<Food>(
-                        initialValue: food,
-                        decoration: const InputDecoration(labelText: 'Food'),
-                        items: catalog
-                            .map((f) => DropdownMenuItem(
-                                value: f,
-                                child: Text(f.name,
-                                    overflow: TextOverflow.ellipsis)))
-                            .toList(),
-                        onChanged: (v) => refresh(() => food = v)),
-                    TextField(
-                        controller: amount,
-                        keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
-                        decoration: const InputDecoration(labelText: 'Amount')),
-                    DropdownButtonFormField<String>(
-                        initialValue: unit,
-                        decoration: const InputDecoration(labelText: 'Unit'),
-                        items: const [
-                          DropdownMenuItem(value: 'g', child: Text('grams')),
-                          DropdownMenuItem(value: 'oz', child: Text('ounces'))
-                        ],
-                        onChanged: (v) => refresh(() => unit = v ?? 'g')),
-                    DropdownButtonFormField<String>(
-                        initialValue: meal,
-                        decoration: const InputDecoration(labelText: 'Meal'),
-                        items: const ['Breakfast', 'Lunch', 'Dinner', 'Snacks']
-                            .map((m) =>
-                                DropdownMenuItem(value: m, child: Text(m)))
-                            .toList(),
-                        onChanged: (v) => refresh(() => meal = v ?? 'Snacks'))
-                  ])),
-                  actions: [
-                    TextButton(
-                        onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('Cancel')),
-                    FilledButton(
-                        onPressed: () => Navigator.pop(ctx, true),
-                        child: const Text('Add'))
-                  ])));
-  final g =
-      (double.tryParse(amount.text.trim()) ?? 0) * (unit == 'oz' ? 28.3495 : 1);
-  if (result == true && food != null && g > 0 && g <= 5000)
-    onAdd(MealEntry(food: food!, grams: g, category: meal));
-}
-
-class ProfileEditorPage extends StatefulWidget {
-  const ProfileEditorPage(
-      {super.key,
-      required this.profile,
-      required this.onSave,
-      this.isSetup = false});
-  final HealthProfile profile;
-  final Future<void> Function() onSave;
-  final bool isSetup;
-
-  @override
-  State<ProfileEditorPage> createState() => _ProfileEditorPageState();
-}
-
-class _ProfileEditorPageState extends State<ProfileEditorPage> {
-  final formKey = GlobalKey<FormState>();
-  late final name = TextEditingController(text: widget.profile.name);
-  late final age = TextEditingController(
-      text: widget.profile.age == 0 ? '' : '${widget.profile.age}');
-  late final height = TextEditingController(
-      text: widget.profile.height == 0 ? '' : '${widget.profile.height}');
-  late final weight = TextEditingController(
-      text: widget.profile.weight == 0 ? '' : '${widget.profile.weight}');
-  late final goalWeight =
-      TextEditingController(text: widget.profile.goalWeight?.toString() ?? '');
-  late String formulaSetting = widget.profile.formulaSetting;
-  late String goal = widget.profile.goal;
-  late double activity = widget.profile.activity;
-  bool saving = false;
-
-  @override
-  void dispose() {
-    name.dispose();
-    age.dispose();
-    height.dispose();
-    weight.dispose();
-    goalWeight.dispose();
-    super.dispose();
-  }
-
-  double? parseNumber(String value) =>
-      double.tryParse(value.trim().replaceAll(',', '.'));
-
-  Future<void> submit() async {
-    if (saving || !(formKey.currentState?.validate() ?? false)) return;
-    final ageValue = int.parse(age.text.trim());
-    final heightValue = parseNumber(height.text)!;
-    final weightValue = parseNumber(weight.text)!;
-    final targetValue =
-        goal == 'Maintain weight' || goalWeight.text.trim().isEmpty
-            ? null
-            : parseNumber(goalWeight.text);
-
-    widget.profile
-      ..name = name.text.trim()
-      ..age = ageValue
-      ..height = heightValue
-      ..weight = weightValue
-      ..goal = goal
-      ..goalWeight = targetValue
-      ..formulaSetting = formulaSetting
-      ..activity = activity;
-
-    setState(() => saving = true);
-    try {
-      await widget.onSave();
-      if (!mounted) return;
-      if (!widget.isSetup) Navigator.of(context).pop();
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Could not save your profile. Please try again.')));
-      setState(() => saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-          automaticallyImplyLeading: !widget.isSetup,
-          backgroundColor: canvas,
-          title: Text(widget.isSetup ? 'Set up your profile' : 'Edit profile'),
-        ),
-        body: Form(
-          key: formKey,
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-            children: [
-              Text(
-                  widget.isSetup
-                      ? 'A few details help MacroLens estimate your daily targets.'
-                      : 'Update your details and nutrition goal.',
-                  style: const TextStyle(color: muted, fontSize: 13)),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: name,
-                textCapitalization: TextCapitalization.words,
-                textInputAction: TextInputAction.next,
-                maxLength: 60,
-                decoration: const InputDecoration(
-                    labelText: 'Name', prefixIcon: Icon(Icons.person_outline)),
-                validator: (value) {
-                  final text = (value ?? '').trim();
-                  if (text.isEmpty) return 'Enter your name.';
-                  if (text.length > 60) return 'Use 60 characters or fewer.';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: age,
-                keyboardType: TextInputType.number,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(labelText: 'Age (years)'),
-                validator: (value) {
-                  final parsed = int.tryParse((value ?? '').trim());
-                  if (parsed == null || parsed < 13 || parsed > 110) {
-                    return 'Enter an age from 13 to 110.';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: height,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                        labelText: 'Height', suffixText: 'cm'),
-                    validator: (value) {
-                      final parsed = parseNumber(value ?? '');
-                      if (parsed == null || parsed < 100 || parsed > 250) {
-                        return 'Use 100–250 cm.';
-                      }
-                      return null;
-                    },
-                  ),
+                'MacroLens',
+                style: TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextFormField(
-                    controller: weight,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                        labelText: 'Current weight', suffixText: 'kg'),
-                    validator: (value) {
-                      final parsed = parseNumber(value ?? '');
-                      if (parsed == null || parsed < 30 || parsed > 350) {
-                        return 'Use 30–350 kg.';
-                      }
-                      return null;
-                    },
-                  ),
-                ),
-              ]),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: goal,
-                decoration: const InputDecoration(
-                    labelText: 'Your goal',
-                    prefixIcon: Icon(Icons.flag_outlined)),
-                items: const [
-                  DropdownMenuItem(
-                      value: 'Lose weight', child: Text('Lose weight')),
-                  DropdownMenuItem(
-                      value: 'Maintain weight', child: Text('Maintain weight')),
-                  DropdownMenuItem(
-                      value: 'Gain weight', child: Text('Gain weight')),
-                ],
-                onChanged: (value) => setState(() => goal = value ?? goal),
               ),
-              if (goal != 'Maintain weight') ...[
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: goalWeight,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                      labelText: 'Goal weight (optional)', suffixText: 'kg'),
-                  validator: (value) {
-                    final text = (value ?? '').trim();
-                    if (text.isEmpty) return null;
-                    final parsed = parseNumber(text);
-                    final current = parseNumber(weight.text);
-                    if (parsed == null || parsed < 30 || parsed > 350) {
-                      return 'Use 30–350 kg.';
-                    }
-                    if (current != null &&
-                        ((goal == 'Lose weight' && parsed >= current) ||
-                            (goal == 'Gain weight' && parsed <= current))) {
-                      return goal == 'Lose weight'
-                          ? 'For this goal, enter a lower weight.'
-                          : 'For this goal, enter a higher weight.';
-                    }
-                    return null;
-                  },
-                ),
-              ],
-              const SizedBox(height: 12),
-              DropdownButtonFormField<double>(
-                initialValue: activity,
-                decoration: const InputDecoration(
-                    labelText: 'Usual activity level',
-                    prefixIcon: Icon(Icons.directions_walk_outlined)),
-                items: const [
-                  DropdownMenuItem(value: 1.2, child: Text('Mostly sitting')),
-                  DropdownMenuItem(value: 1.375, child: Text('Light activity')),
-                  DropdownMenuItem(
-                      value: 1.55, child: Text('Moderate activity')),
-                  DropdownMenuItem(value: 1.725, child: Text('Very active')),
-                ],
-                onChanged: (value) =>
-                    setState(() => activity = value ?? activity),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: formulaSetting,
-                decoration: const InputDecoration(
-                    labelText: 'BMR formula setting',
-                    prefixIcon: Icon(Icons.tune_rounded)),
-                items: const [
-                  DropdownMenuItem(value: 'Female', child: Text('Female')),
-                  DropdownMenuItem(value: 'Male', child: Text('Male')),
-                  DropdownMenuItem(value: 'Average', child: Text('Average')),
-                ],
-                onChanged: (value) =>
-                    setState(() => formulaSetting = value ?? formulaSetting),
-              ),
-              const Padding(
-                padding: EdgeInsets.only(top: 5, left: 12),
-                child: Text(
-                    'This setting is only used by the calorie equation; it is not a gender identity field.',
-                    style: TextStyle(color: muted, fontSize: 11)),
-              ),
-              const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                    color: lime, borderRadius: BorderRadius.circular(13)),
-                child: const Text(
-                    'Targets are rough estimates for adults 18+. They are not intended for pregnancy, breastfeeding, or medical nutrition plans. Profile details are saved on this device only.',
-                    style: TextStyle(color: muted, fontSize: 11, height: 1.4)),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 50,
-                child: FilledButton(
-                  onPressed: saving ? null : submit,
-                  style: FilledButton.styleFrom(
-                      backgroundColor: green, foregroundColor: Colors.white),
-                  child: saving
-                      ? const SizedBox.square(
-                          dimension: 20,
-                          child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2))
-                      : Text(widget.isSetup ? 'Save profile' : 'Save changes',
-                          style: const TextStyle(fontWeight: FontWeight.w800)),
-                ),
+              SizedBox(height: 14),
+              SizedBox.square(
+                dimension: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
               ),
             ],
           ),
