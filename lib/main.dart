@@ -76,7 +76,7 @@ class Food {
 }
 
 class MealEntry {
-  MealEntry(
+  MealEntry( 
       {required this.food,
       required this.grams,
       required this.category,
