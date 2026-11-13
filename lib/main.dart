@@ -90,7 +90,7 @@ class _MacroLensAppState extends State<MacroLensApp> {
     });
     _persistLog();
     _showSnack(
-      'Added ${entry.food.name}',
+      'Logged ${entry.food.name}',
       action: SnackBarAction(
         label: 'Undo',
         onPressed: () => _undoEntry(entry),

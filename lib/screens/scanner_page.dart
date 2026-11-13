@@ -223,7 +223,7 @@ class _ScannerPageState extends State<ScannerPage> {
     setState(() => selectedFood = picked);
   }
 
-  void addFood() {
+  void logFood() {
     final food = selectedFood;
     final amountGrams = enteredGrams();
     if (food == null) {
@@ -731,9 +731,9 @@ class _ScannerPageState extends State<ScannerPage> {
             width: double.infinity,
             height: 49,
             child: FilledButton.icon(
-              onPressed: addFood,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Add food'),
+              onPressed: logFood,
+              icon: const Icon(Icons.playlist_add_check_rounded),
+              label: const Text('Log food'),
             ),
           ),
         ],
