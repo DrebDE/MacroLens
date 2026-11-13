@@ -91,6 +91,8 @@ class _MacroLensAppState extends State<MacroLensApp> {
     _persistLog();
     _showSnack(
       'Logged ${entry.food.name}',
+      duration: const Duration(seconds: 3),
+      persist: false,
       action: SnackBarAction(
         label: 'Undo',
         onPressed: () => _undoEntry(entry),
@@ -154,12 +156,24 @@ class _MacroLensAppState extends State<MacroLensApp> {
     _showSnack('Meal history cleared');
   }
 
-  void _showSnack(String message, {SnackBarAction? action}) {
+  void _showSnack(
+    String message, {
+    SnackBarAction? action,
+    Duration? duration,
+    bool? persist,
+  }) {
     final messenger = messengerKey.currentState;
     if (messenger == null) return;
     messenger
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message), action: action));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          action: action,
+          duration: duration ?? const Duration(seconds: 4),
+          persist: persist,
+        ),
+      );
   }
 
   @override
