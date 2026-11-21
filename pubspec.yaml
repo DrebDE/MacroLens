@@ -1,7 +1,7 @@
 name: macro_scan
-description: Photo-based macronutrient tracker.
+description: MacroLens - a photo-assisted calorie and macronutrient tracker with Nouri.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.2.0+3
 environment:
   sdk: '>=3.3.0 <4.0.0'
 dependencies:
@@ -11,5 +11,8 @@ dependencies:
   http_parser: ^4.1.2
   image_picker: ^1.2.4
   shared_preferences: ^2.5.6
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
 flutter:
   uses-material-design: true
